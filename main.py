@@ -26,31 +26,81 @@ def read_json_files(files):
 
     combined_dataframe = pd.concat(dfs, ignore_index=True)
     combined_dataframe = combined_dataframe.sort_values(by='datetime')
-    print(combined_dataframe)
     return combined_dataframe
 
 def count_messages_sent(df):
-    return df.value_counts('sender_name')
+    numbers = df.value_counts('sender_name')
+    proportions = df.value_counts('sender_name', True)
+    print(numbers)
+    print(proportions)
 
 def count_most_frequent(df):
-    return df['content'].value_counts().head(20)
+    return df['content'].value_counts().head(10)
+
+def get_messages_per_day(df):
+    return df.set_index("datetime").resample("D").size()
+
+def most_active_days(df, num):
+    return get_messages_per_day(df).sort_values(ascending=False).head(num)
 
 def build_freq_graph(df):
-    df = df.set_index("datetime")
-    messages_per_day = df.resample("D").size()
-    messages_per_day.to_csv("output.csv")
+    daily = get_messages_per_day(df)
     plt.figure(figsize=(12,6))
-    messages_per_day.plot()
-    plt.title("Messages Over Time (Daily)")
+    daily.plot()
+    plt.title("Messages Sent Per Day")
     plt.xlabel("Date")
-    plt.ylabel("Number of Messages")
+    plt.ylabel("Message Count")
     plt.tight_layout()
     plt.savefig("messages_over_time.png")
 
-files = find_all_files(r"")
-data = read_json_files(files)
-result = count_messages_sent(data)
+def get_message_streaks(df):
+    df = df.sort_values("datetime")
+    dates = df["datetime"].dt.normalize().drop_duplicates()
+    data_range = pd.date_range(start=dates.min(), end = dates.max(), freq = "D")
+    sent_range = data_range.isin(dates)
+    
+    max_streak = current_streak = 0
+    streak_start = max_streak_start = max_streak_end = None
 
-build_freq_graph(data)
-print(count_most_frequent(data))
-print(result)
+    max_gap = current_gap = 0
+    gap_start = max_gap_start = max_gap_end = None
+
+    for i, sent in enumerate(sent_range):
+        date = data_range[i]
+        if sent:
+            if current_streak == 0:
+                streak_start = date
+            current_streak += 1
+            if current_streak > max_streak:
+                max_streak = current_streak
+                max_streak_start = streak_start
+                max_streak_end = date
+
+            current_gap = 0
+        else:
+            if current_gap == 0:
+                gap_start = date
+            current_gap += 1
+            if current_gap > max_gap:
+                max_gap = current_gap
+                max_gap_start = gap_start
+                max_gap_end = date
+
+            current_streak = 0
+
+    return {
+    "max_message_streak": {
+        "length": max_streak,
+        "start": max_streak_start,
+        "end": max_streak_end
+    },
+    "max_gap": {
+        "length": max_gap,
+        "start": max_gap_start,
+        "end": max_gap_end
+    }
+    }   
+
+files = find_all_files(r"YOUR FOLDER HERE")
+data = read_json_files(files)
+print(most_active_days(data, 5))
