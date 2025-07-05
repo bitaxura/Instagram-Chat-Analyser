@@ -2,6 +2,7 @@ import pandas as pd
 import os
 import orjson
 import matplotlib.pyplot as plt
+import grapheme
 
 def find_all_files(folder_path):
     all_files = os.listdir(folder_path)
@@ -28,33 +29,29 @@ def read_json_files(files):
     combined_dataframe = combined_dataframe.sort_values(by='datetime')
     return combined_dataframe
 
-def count_messages_sent(df):
+
+def count_messages_sent(df: pd.DataFrame):
     numbers = df.value_counts('sender_name')
     proportions = df.value_counts('sender_name', True)
     print(numbers)
     print(proportions)
 
-def count_most_frequent(df):
+def count_most_frequent(df: pd.DataFrame):
     return df['content'].value_counts().head(10)
 
-def get_messages_per_day(df):
+def get_messages_per_day(df: pd.DataFrame):
     return df.set_index("datetime").resample("D").size()
 
-def most_active_days(df, num):
+def most_active_days(df: pd.DataFrame, num: int):
     return get_messages_per_day(df).sort_values(ascending=False).head(num)
 
-def build_freq_graph(df):
-    daily = get_messages_per_day(df)
-    plt.figure(figsize=(12,6))
-    daily.plot()
-    plt.title("Messages Sent Per Day")
-    plt.xlabel("Date")
-    plt.ylabel("Message Count")
-    plt.tight_layout()
-    plt.savefig("messages_over_time.png")
+def average_message_length(df: pd.DataFrame):
+    df['content_length'] = df['content'].apply(lambda x: grapheme.length(x) if isinstance(x, str) else 0)
+    avg_lengths = df.groupby('sender_name')['content_length'].mean()
+    
+    return avg_lengths
 
-def get_message_streaks(df):
-    df = df.sort_values("datetime")
+def get_message_streaks(df: pd.DataFrame):
     dates = df["datetime"].dt.normalize().drop_duplicates()
     data_range = pd.date_range(start=dates.min(), end = dates.max(), freq = "D")
     sent_range = data_range.isin(dates)
@@ -99,8 +96,21 @@ def get_message_streaks(df):
         "start": max_gap_start,
         "end": max_gap_end
     }
-    }   
+    }
 
-files = find_all_files(r"YOUR FOLDER HERE")
+
+def build_freq_graph(df: pd.DataFrame):
+    daily = get_messages_per_day(df)
+    plt.figure(figsize=(12,6))
+    daily.plot()
+    plt.title("Messages Sent Per Day")
+    plt.xlabel("Date")
+    plt.ylabel("Message Count")
+    plt.tight_layout()
+    plt.savefig("messages_over_time.png")
+
+files = find_all_files(r"YOUR FOLDER PATH HERE")
 data = read_json_files(files)
-print(most_active_days(data, 5))
+
+data.to_csv()
+#print(average_message_length(data))
