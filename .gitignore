@@ -1,3 +1,6 @@
+venv/
+
 *.json
 *.png
 *.csv
+*.prof
