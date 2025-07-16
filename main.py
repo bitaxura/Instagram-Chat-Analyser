@@ -34,9 +34,10 @@ def read_json_files(files):
 
         df['datetime'] = pd.to_datetime(df["timestamp_ms"], unit="ms")
         df = df[[col for col in cols_to_keep if col in df.columns]]
-        df = df[df['content'] != 'Liked a message']
+        df = df[~df['content'].str.lower().str.endswith('liked a message', na=False)]
         df = df[~df['content'].str.match(pattern, na=False)]
-        mask = df['content'].apply(looks_double_encoded)
+        df = df[~df['content'].str.contains('This poll is no longer available.', na=False)]
+        mask = df['content'].swifter.apply(looks_double_encoded)
         df.loc[mask, 'content'] = df.loc[mask, 'content'].swifter.apply(fix_emoji_encoding)
 
         dfs.append(df)
@@ -50,8 +51,10 @@ def clean_text(text):
     text = re.sub(r'http\S+|www\S+|https\S+', '', text)
     text = re.sub(r"[^\w\s]", '', text)
     tokens = word_tokenize(text)
+    tokens = [word.strip() for word in tokens]
     
-    return [word for word in tokens if word not in stop_words]
+    output = [word for word in tokens if word not in stop_words]
+    return output
 
 def fix_emoji_encoding(s):
     try:
@@ -63,6 +66,13 @@ def looks_double_encoded(s):
     if not isinstance(s, str):
         return False
     return any(128 <= ord(c) <= 255 for c in s)
+
+def preserve_attachment_phrases(s):
+    s = s.lower()
+
+    s = re.sub(r'\b(\w+)\s+sent an attachment\b', r'\1_sent_an_attachment', s)
+    return s
+
 
 def count_messages_sent(df: pd.DataFrame):
 
@@ -84,7 +94,7 @@ def most_active_days(df: pd.DataFrame, num: int):
     return get_messages_per_day(df).sort_values(ascending=False).head(num)
 
 def average_message_length(df: pd.DataFrame):
-    df['content_length'] = df['content'].apply(lambda x: grapheme.length(x) if isinstance(x, str) else 0)
+    df['content_length'] = df['content'].swifter.apply(lambda x: grapheme.length(x) if isinstance(x, str) else 0)
     avg_lengths = df.groupby('sender_name')['content_length'].mean()
     
     return avg_lengths
@@ -148,9 +158,9 @@ def build_freq_graph(df: pd.DataFrame):
     plt.savefig("messages_over_time.png")
 
 def generate_wordcloud(df: pd.DataFrame):
-    all_words = df['content'].dropna().apply(clean_text).explode()
+    all_words = df['content'].dropna().swifter.apply(preserve_attachment_phrases).swifter.apply(clean_text).explode()
     all_words = all_words[all_words.str.len() > 0]
-    wordcloud = WordCloud(width=800, height=400, background_color='white').generate(' '.join(all_words))
+    wordcloud = WordCloud(width=1000, height=500, background_color='white', collocations=False).generate(' '.join(all_words))
     plt.figure(figsize=(10, 5))
     plt.imshow(wordcloud, interpolation='bilinear')
     plt.axis('off')
@@ -159,5 +169,3 @@ def generate_wordcloud(df: pd.DataFrame):
 
 files = find_all_files(r"YOUR_FOLDER_PATH_HERE")
 data = read_json_files(files)
-
-print(data)
