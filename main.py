@@ -1,8 +1,20 @@
-import pandas as pd
 import os
-import orjson
+import re
+import swifter
+
 import matplotlib.pyplot as plt
+import nltk
+from nltk.corpus import stopwords
+from nltk.tokenize import word_tokenize
+import orjson
+import pandas as pd
+from wordcloud import WordCloud
 import grapheme
+
+nltk.download('punkt_tab')
+nltk.download('stopwords')
+
+stop_words = set(stopwords.words('english'))
 
 def find_all_files(folder_path):
     all_files = os.listdir(folder_path)
@@ -12,6 +24,7 @@ def find_all_files(folder_path):
 def read_json_files(files):
     dfs = []
     cols_to_keep = ['sender_name', 'datetime', 'content', 'reactions', 'share.link', 'share.share_text', "share.original_content_owner", 'photos', 'audio_files']
+    pattern = r'^Reacted ".*" to your message$'
 
     for file in files:
         with open(file, 'rb') as f:
@@ -22,6 +35,9 @@ def read_json_files(files):
         df['datetime'] = pd.to_datetime(df["timestamp_ms"], unit="ms")
         df = df[[col for col in cols_to_keep if col in df.columns]]
         df = df[df['content'] != 'Liked a message']
+        df = df[~df['content'].str.match(pattern, na=False)]
+        mask = df['content'].apply(looks_double_encoded)
+        df.loc[mask, 'content'] = df.loc[mask, 'content'].swifter.apply(fix_emoji_encoding)
 
         dfs.append(df)
 
@@ -29,12 +45,34 @@ def read_json_files(files):
     combined_dataframe = combined_dataframe.sort_values(by='datetime')
     return combined_dataframe
 
+def clean_text(text):
+    text = text.lower()
+    text = re.sub(r'http\S+|www\S+|https\S+', '', text)
+    text = re.sub(r"[^\w\s]", '', text)
+    tokens = word_tokenize(text)
+    
+    return [word for word in tokens if word not in stop_words]
+
+def fix_emoji_encoding(s):
+    try:
+        return s.encode('latin1').decode('utf-8')
+    except Exception:
+        return s
+
+def looks_double_encoded(s):
+    if not isinstance(s, str):
+        return False
+    return any(128 <= ord(c) <= 255 for c in s)
 
 def count_messages_sent(df: pd.DataFrame):
+
     numbers = df.value_counts('sender_name')
     proportions = df.value_counts('sender_name', True)
-    print(numbers)
-    print(proportions)
+
+    return {
+        "message_per_user": numbers,
+        "message_proportions": proportions
+    }
 
 def count_most_frequent(df: pd.DataFrame):
     return df['content'].value_counts().head(10)
@@ -53,7 +91,7 @@ def average_message_length(df: pd.DataFrame):
 
 def get_message_streaks(df: pd.DataFrame):
     dates = df["datetime"].dt.normalize().drop_duplicates()
-    data_range = pd.date_range(start=dates.min(), end = dates.max(), freq = "D")
+    data_range = pd.date_range(dates.min(), dates.max(), freq = "D")
     sent_range = data_range.isin(dates)
     
     max_streak = current_streak = 0
@@ -109,8 +147,17 @@ def build_freq_graph(df: pd.DataFrame):
     plt.tight_layout()
     plt.savefig("messages_over_time.png")
 
-files = find_all_files(r"YOUR FOLDER PATH HERE")
+def generate_wordcloud(df: pd.DataFrame):
+    all_words = df['content'].dropna().apply(clean_text).explode()
+    all_words = all_words[all_words.str.len() > 0]
+    wordcloud = WordCloud(width=800, height=400, background_color='white').generate(' '.join(all_words))
+    plt.figure(figsize=(10, 5))
+    plt.imshow(wordcloud, interpolation='bilinear')
+    plt.axis('off')
+    plt.savefig("wordcloud.png")
+
+
+files = find_all_files(r"YOUR_FOLDER_PATH_HERE")
 data = read_json_files(files)
 
-data.to_csv()
-#print(average_message_length(data))
+print(data)
