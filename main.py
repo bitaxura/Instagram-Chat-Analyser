@@ -2,6 +2,7 @@ import os
 import re
 import swifter
 
+import numpy as np
 import matplotlib.pyplot as plt
 import nltk
 from nltk.corpus import stopwords
@@ -16,15 +17,15 @@ nltk.download('stopwords')
 
 stop_words = set(stopwords.words('english'))
 
-def find_all_files(folder_path):
+def find_all_files(folder_path: str):
     all_files = os.listdir(folder_path)
     files = [os.path.join(folder_path, f) for f in all_files if f.endswith('.json')]
     return files
 
-def read_json_files(files):
+def read_json_files(files: list[str]):
     dfs = []
     cols_to_keep = ['sender_name', 'datetime', 'content', 'reactions', 'share.link', 'share.share_text', "share.original_content_owner", 'photos', 'audio_files']
-    pattern = r'^Reacted ".*" to your message$'
+    pattern = r'^[\w\.\-_]+ reacted .+ to your message$'
 
     for file in files:
         with open(file, 'rb') as f:
@@ -32,11 +33,15 @@ def read_json_files(files):
         messages = data.get('messages')
         df = pd.json_normalize(messages)
 
-        df['datetime'] = pd.to_datetime(df["timestamp_ms"], unit="ms")
+        df['datetime'] = pd.to_datetime(df["timestamp_ms"], unit="ms", utc=True)
+        df['datetime'] = df['datetime'].dt.tz_convert('America/New_York')
+
         df = df[[col for col in cols_to_keep if col in df.columns]]
+
         df = df[~df['content'].str.lower().str.endswith('liked a message', na=False)]
-        df = df[~df['content'].str.match(pattern, na=False)]
+        df = df[~df['content'].str.lower().str.strip().str.endswith('to your message', na=False)]
         df = df[~df['content'].str.contains('This poll is no longer available.', na=False)]
+
         mask = df['content'].swifter.apply(looks_double_encoded)
         df.loc[mask, 'content'] = df.loc[mask, 'content'].swifter.apply(fix_emoji_encoding)
 
@@ -44,10 +49,9 @@ def read_json_files(files):
 
     combined_dataframe = pd.concat(dfs, ignore_index=True)
     combined_dataframe = combined_dataframe.sort_values(by='datetime')
-    return combined_dataframe
+    return combined_dataframe    
 
-def clean_text(text):
-    text = text.lower()
+def clean_text(text: str):
     text = re.sub(r'http\S+|www\S+|https\S+', '', text)
     text = re.sub(r"[^\w\s]", '', text)
     tokens = word_tokenize(text)
@@ -56,7 +60,7 @@ def clean_text(text):
     output = [word for word in tokens if word not in stop_words]
     return output
 
-def fix_emoji_encoding(s):
+def fix_emoji_encoding(s: str):
     try:
         return s.encode('latin1').decode('utf-8')
     except Exception:
@@ -67,7 +71,7 @@ def looks_double_encoded(s):
         return False
     return any(128 <= ord(c) <= 255 for c in s)
 
-def preserve_attachment_phrases(s):
+def preserve_attachment_phrases(s: str):
     s = s.lower()
 
     s = re.sub(r'\b(\w+)\s+sent an attachment\b', r'\1_sent_an_attachment', s)
@@ -75,7 +79,6 @@ def preserve_attachment_phrases(s):
 
 
 def count_messages_sent(df: pd.DataFrame):
-
     numbers = df.value_counts('sender_name')
     proportions = df.value_counts('sender_name', True)
 
@@ -87,11 +90,11 @@ def count_messages_sent(df: pd.DataFrame):
 def count_most_frequent(df: pd.DataFrame):
     return df['content'].value_counts().head(10)
 
-def get_messages_per_day(df: pd.DataFrame):
-    return df.set_index("datetime").resample("D").size()
+def get_messages_per_index(df: pd.DataFrame, index: str):
+    return df.set_index("datetime").resample(index).size()
 
 def most_active_days(df: pd.DataFrame, num: int):
-    return get_messages_per_day(df).sort_values(ascending=False).head(num)
+    return get_messages_per_index(df, "D").sort_values(ascending=False).head(num)
 
 def average_message_length(df: pd.DataFrame):
     df['content_length'] = df['content'].swifter.apply(lambda x: grapheme.length(x) if isinstance(x, str) else 0)
@@ -146,26 +149,67 @@ def get_message_streaks(df: pd.DataFrame):
     }
     }
 
+def day_time_graph(df: pd.DataFrame):
+    df['day_of_week'] = df['datetime'].dt.day_name()
+    df['hour'] = df['datetime'].dt.hour
+    
+    pivot_table = df.pivot_table(
+        index='day_of_week',
+        columns='hour',
+        values='datetime',
+        aggfunc='count',
+    )
+    days_order = ['Monday', 'Tuesday', 'Wednesday', 'Thursday', 'Friday', 'Saturday', 'Sunday']
+    pivot_table = pivot_table.reindex(days_order)
+    pivot_table = pivot_table.fillna(0).astype(int)
 
-def build_freq_graph(df: pd.DataFrame):
-    daily = get_messages_per_day(df)
+    data = pivot_table.to_numpy()
+
+    fig, ax = plt.subplots(figsize=(14, 6))
+    cax = ax.imshow(data, aspect='auto', cmap='YlOrRd')
+
+    ax.set_xticks(np.arange(24))
+    ax.set_yticks(np.arange(len(days_order)))
+    ax.set_xticklabels(pivot_table.columns)
+    ax.set_yticklabels(days_order)
+
+    plt.setp(ax.get_xticklabels(), rotation=45, ha="right", rotation_mode="anchor")
+
+    cbar = fig.colorbar(cax)
+    cbar.set_label('Count')
+
+    for i in range(data.shape[0]):
+        for j in range(data.shape[1]):
+            value = int(data[i, j])
+            ax.text(j, i, str(value), ha='center', va='center', color='black', fontsize=8)
+
+    ax.set_title('Activity by Day and Hour')
+    ax.set_xlabel('Hour of Day')
+    ax.set_ylabel('Day of Week')
+
+    plt.show()
+
+
+def build_freq_graph(df: pd.DataFrame, index: str):
+    frequency = get_messages_per_index(df, index)
     plt.figure(figsize=(12,6))
-    daily.plot()
+    pl = frequency.plot()
     plt.title("Messages Sent Per Day")
     plt.xlabel("Date")
     plt.ylabel("Message Count")
     plt.tight_layout()
-    plt.savefig("messages_over_time.png")
+
+    plt.show()
 
 def generate_wordcloud(df: pd.DataFrame):
     all_words = df['content'].dropna().swifter.apply(preserve_attachment_phrases).swifter.apply(clean_text).explode()
     all_words = all_words[all_words.str.len() > 0]
-    wordcloud = WordCloud(width=1000, height=500, background_color='white', collocations=False).generate(' '.join(all_words))
-    plt.figure(figsize=(10, 5))
-    plt.imshow(wordcloud, interpolation='bilinear')
+    all_words.to_csv("all_words.csv", index=False)
+    wordcloud = WordCloud(width=2000, height=1000, background_color='white', collocations=False).generate(' '.join(all_words))
+    plt.figure(figsize=(20, 10), dpi=300)
+    plt.imshow(wordcloud)
     plt.axis('off')
-    plt.savefig("wordcloud.png")
-
+    plt.savefig("wordcloud.png", bbox_inches='tight', pad_inches=0.5)
 
 files = find_all_files(r"YOUR_FOLDER_PATH_HERE")
 data = read_json_files(files)
