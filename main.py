@@ -1,21 +1,47 @@
 import os
-import re
-import swifter
+import regex as re
+import time
 
 import numpy as np
 import matplotlib.pyplot as plt
-import nltk
-from nltk.corpus import stopwords
-from nltk.tokenize import word_tokenize
+import spacy
 import orjson
 import pandas as pd
 from wordcloud import WordCloud
+from collections import Counter
 import grapheme
 
-nltk.download('punkt_tab')
-nltk.download('stopwords')
+url_pattern = re.compile(r'https?://\S+|www\.\S+')
+punct_pattern = re.compile(r'[^\w\s\U0001F300-\U0001F6FF\U0001F900-\U0001F9FF]')
+attachment_pattern = re.compile(r'\b(\w+)\s+sent an attachment\b')
 
-stop_words = set(stopwords.words('english'))
+stop_words = {
+    'his', 'while', 'been', 'few', 'haven', "we've", 'is', 'which', "you'll", 'shan',
+    "hasn't", "you've", "you're", 'against', 'no', 'if', "they're", 'again', 'these',
+    'about', 'hers', "she'll", 'some', 'into', 'with', 'as', "hadn't", "haven't",
+    "doesn't", 'who', 'the', 'and', 'can', 'only', 'there', 'to', "he'll", "we're",
+    "couldn't", 'it', 'my', 'than', "she's", 'out', 'shouldn', 'don', 'once', 'o',
+    'itself', 'during', 'theirs', 're', "he's", "they'd", "won't", 'm', 'more',
+    'their', "it'll", "don't", 'very', 'where', "wouldn't", 'himself', 'here', 'him',
+    'me', 'from', 'was', 'not', 'for', 'by', 'should', 'own', 'through', 'i', 'those',
+    "they've", 'hadn', 'ain', 'mustn', "you'd", 'both', 'over', 'whom', 'below',
+    'mightn', "we'd", 'her', "i'll", 'd', 'most', "shouldn't", "she'd", 'at', 'our',
+    'further', 'll', 'because', 'above', 'on', 've', 'an', 'how', 'what', 'after',
+    'too', 'in', "mightn't", 'didn', 'same', 'yourselves', 'or', "should've", 'your',
+    'yourself', 'do', "that'll", "isn't", "needn't", 'down', 'won', 'aren', 'had',
+    "i'd", 'then', 'this', 'its', 'did', 'when', 'all', 'you', 'hasn', 'myself', 'up',
+    'each', "mustn't", 'a', 'any', "it'd", 'she', 'are', 'but', 'having', 'before',
+    'until', 'wasn', 'am', "shan't", 'couldn', 'weren', "i've", 'isn', "they'll",
+    "he'd", 'be', 't', 'ours', "it's", "aren't", 'he', 's', 'we', 'they', 'doing',
+    "wasn't", 'ma', 'being', 'under', 'why', "didn't", 'needn', 'of', 'between',
+    'other', 'were', 'does', 'doesn', 'herself', 'that', "we'll", "weren't", 'just',
+    'off', 'such', 'nor', 'will', 'them', "i'm", 'themselves', 'has', 'ourselves',
+    'yours', 'wouldn', 'now', 'have', 'so'
+}
+
+nlp = spacy.blank("en")
+
+font_path = "C:\\Windows\\Fonts\\seguiemj.ttf"
 
 def find_all_files(folder_path: str):
     all_files = os.listdir(folder_path)
@@ -24,8 +50,6 @@ def find_all_files(folder_path: str):
 
 def read_json_files(files: list[str]):
     dfs = []
-    cols_to_keep = ['sender_name', 'datetime', 'content', 'reactions', 'share.link', 'share.share_text', "share.original_content_owner", 'photos', 'audio_files']
-    pattern = r'^[\w\.\-_]+ reacted .+ to your message$'
 
     for file in files:
         with open(file, 'rb') as f:
@@ -33,32 +57,42 @@ def read_json_files(files: list[str]):
         messages = data.get('messages')
         df = pd.json_normalize(messages)
 
-        df['datetime'] = pd.to_datetime(df["timestamp_ms"], unit="ms", utc=True)
-        df['datetime'] = df['datetime'].dt.tz_convert('America/New_York')
-
-        df = df[[col for col in cols_to_keep if col in df.columns]]
-
-        df = df[~df['content'].str.lower().str.endswith('liked a message', na=False)]
-        df = df[~df['content'].str.lower().str.strip().str.endswith('to your message', na=False)]
-        df = df[~df['content'].str.contains('This poll is no longer available.', na=False)]
-
-        mask = df['content'].swifter.apply(looks_double_encoded)
-        df.loc[mask, 'content'] = df.loc[mask, 'content'].swifter.apply(fix_emoji_encoding)
+        df = clean_data(df)
 
         dfs.append(df)
 
     combined_dataframe = pd.concat(dfs, ignore_index=True)
     combined_dataframe = combined_dataframe.sort_values(by='datetime')
-    return combined_dataframe    
+    return combined_dataframe
+
+def clean_data(df: pd.DataFrame):
+    cols_to_keep = ['sender_name', 'datetime', 'content', 'reactions', 'share.link', 'share.share_text', "share.original_content_owner", 'photos', 'audio_files']
+
+    df['datetime'] = pd.to_datetime(df["timestamp_ms"], unit="ms", utc=True)
+    df['datetime'] = df['datetime'].dt.tz_convert('America/New_York')
+
+    df = df[[col for col in cols_to_keep if col in df.columns]]
+
+    df = df[~df['content'].str.lower().str.endswith('liked a message', na=False)]
+    df = df[~df['content'].str.lower().str.strip().str.endswith('to your message', na=False)]
+    df = df[~df['content'].str.contains('This poll is no longer available.', na=False)]
+
+    attachment_mask = df['content'].str.contains('sent an attachment', na=False)
+    df.loc[attachment_mask, 'content'] = df.loc[attachment_mask, 'content'].apply(preserve_attachment_phrases)
+
+    emoji_mask = df['content'].apply(looks_double_encoded)
+    df.loc[emoji_mask, 'content'] = df.loc[emoji_mask, 'content'].apply(fix_emoji_encoding)
+
+    return df
 
 def clean_text(text: str):
-    text = re.sub(r'http\S+|www\S+|https\S+', '', text)
-    text = re.sub(r"[^\w\s]", '', text)
-    tokens = word_tokenize(text)
+    text = url_pattern.sub('', text)
+    text = punct_pattern.sub('', text)
+    tokens = [token.text for token in nlp(text)]
     tokens = [word.strip() for word in tokens]
-    
+
     output = [word for word in tokens if word not in stop_words]
-    return output
+    return ' '.join(output)
 
 def fix_emoji_encoding(s: str):
     try:
@@ -72,11 +106,15 @@ def looks_double_encoded(s):
     return any(128 <= ord(c) <= 255 for c in s)
 
 def preserve_attachment_phrases(s: str):
-    s = s.lower()
-
-    s = re.sub(r'\b(\w+)\s+sent an attachment\b', r'\1_sent_an_attachment', s)
+    s = attachment_pattern.sub(r'\1_sent_an_attachment', s)
     return s
 
+
+def get_total_messages(df: pd.DataFrame):
+    return df['content'].notna().sum()
+
+def get_message_count(df: pd.DataFrame, text: str):
+    return df['content'].str.contains(text, case=False, na=False).sum()
 
 def count_messages_sent(df: pd.DataFrame):
     numbers = df.value_counts('sender_name')
@@ -88,7 +126,7 @@ def count_messages_sent(df: pd.DataFrame):
     }
 
 def count_most_frequent(df: pd.DataFrame):
-    return df['content'].value_counts().head(10)
+    return df['content'].value_counts().head(20)
 
 def get_messages_per_index(df: pd.DataFrame, index: str):
     return df.set_index("datetime").resample(index).size()
@@ -97,7 +135,7 @@ def most_active_days(df: pd.DataFrame, num: int):
     return get_messages_per_index(df, "D").sort_values(ascending=False).head(num)
 
 def average_message_length(df: pd.DataFrame):
-    df['content_length'] = df['content'].swifter.apply(lambda x: grapheme.length(x) if isinstance(x, str) else 0)
+    df['content_length'] = df['content'].apply(lambda x: grapheme.length(x) if isinstance(x, str) else 0)
     avg_lengths = df.groupby('sender_name')['content_length'].mean()
     
     return avg_lengths
@@ -149,6 +187,7 @@ def get_message_streaks(df: pd.DataFrame):
     }
     }
 
+
 def day_time_graph(df: pd.DataFrame):
     df['day_of_week'] = df['datetime'].dt.day_name()
     df['hour'] = df['datetime'].dt.hour
@@ -187,29 +226,46 @@ def day_time_graph(df: pd.DataFrame):
     ax.set_xlabel('Hour of Day')
     ax.set_ylabel('Day of Week')
 
-    plt.show()
-
+    plt.savefig("day_time_graph.png", bbox_inches='tight', pad_inches=0.5)
 
 def build_freq_graph(df: pd.DataFrame, index: str):
     frequency = get_messages_per_index(df, index)
     plt.figure(figsize=(12,6))
-    pl = frequency.plot()
+    frequency.plot()
     plt.title("Messages Sent Per Day")
     plt.xlabel("Date")
     plt.ylabel("Message Count")
     plt.tight_layout()
 
-    plt.show()
+    plt.savefig("messages_per_day.png", bbox_inches='tight', pad_inches=0.5)
 
 def generate_wordcloud(df: pd.DataFrame):
-    all_words = df['content'].dropna().swifter.apply(preserve_attachment_phrases).swifter.apply(clean_text).explode()
+    all_words = df['content'].dropna().apply(clean_text)
+
     all_words = all_words[all_words.str.len() > 0]
-    all_words.to_csv("all_words.csv", index=False)
-    wordcloud = WordCloud(width=2000, height=1000, background_color='white', collocations=False).generate(' '.join(all_words))
+
+    freq = Counter(all_words)
+    
+    wordcloud = WordCloud(
+        width=2000,
+        height=1000,
+        background_color='white',
+        collocations=False,
+        font_path=font_path,
+        font_step=2,
+        max_words=200,
+        relative_scaling=0.25,
+        min_font_size=40
+    )
+    wordcloud.generate_from_frequencies(freq)
+    
     plt.figure(figsize=(20, 10), dpi=300)
     plt.imshow(wordcloud)
     plt.axis('off')
     plt.savefig("wordcloud.png", bbox_inches='tight', pad_inches=0.5)
 
-files = find_all_files(r"YOUR_FOLDER_PATH_HERE")
-data = read_json_files(files)
+if __name__ == "__main__":
+    word = "💔👎👍Hello🤓🤓"
+
+    files = find_all_files(r"YOUR_FOLDER_PATH_HERE")
+    data = read_json_files(files)
