@@ -1,7 +1,8 @@
 numpy
 matplotlib
-nltk
 orjson
 pandas
 wordcloud
 grapheme
+spacy
+regex
