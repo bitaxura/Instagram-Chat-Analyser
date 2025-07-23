@@ -1,8 +1,11 @@
 import os
 import regex as re
 import time
+from concurrent.futures import ThreadPoolExecutor
 
 import numpy as np
+import matplotlib
+matplotlib.use('Agg')
 import matplotlib.pyplot as plt
 import spacy
 import orjson
@@ -36,17 +39,32 @@ stop_words = {
     "wasn't", 'ma', 'being', 'under', 'why', "didn't", 'needn', 'of', 'between',
     'other', 'were', 'does', 'doesn', 'herself', 'that', "we'll", "weren't", 'just',
     'off', 'such', 'nor', 'will', 'them', "i'm", 'themselves', 'has', 'ourselves',
-    'yours', 'wouldn', 'now', 'have', 'so'
+    'yours', 'wouldn', 'now', 'have', 'so', 'nt'
 }
 
 nlp = spacy.blank("en")
-
 font_path = "C:\\Windows\\Fonts\\seguiemj.ttf"
+
+def find_all_folder(folder_path: str):
+    all_folders = os.listdir(folder_path)
+    folders = [os.path.join(folder_path, f) for f in all_folders if os.path.isdir(os.path.join(folder_path, f))]
+    return folders
 
 def find_all_files(folder_path: str):
     all_files = os.listdir(folder_path)
     files = [os.path.join(folder_path, f) for f in all_files if f.endswith('.json')]
     return files
+
+def make_unique_dir(base_dir, desired_name):
+    candidate = os.path.join(base_dir, desired_name)
+    if not os.path.exists(candidate):
+        return candidate
+    i = 1
+    while True:
+        candidate_i = os.path.join(base_dir, f"{desired_name}{i}")
+        if not os.path.exists(candidate_i):
+            return candidate_i
+        i += 1
 
 def read_json_files(files: list[str]):
     dfs = []
@@ -109,6 +127,13 @@ def preserve_attachment_phrases(s: str):
     s = attachment_pattern.sub(r'\1_sent_an_attachment', s)
     return s
 
+def default(obj):
+    if hasattr(obj, "tolist"):
+        return obj.tolist()
+    if hasattr(obj, "isoformat"):
+        return obj.isoformat()
+    raise TypeError(f"Type {type(obj)} not serializable")
+
 
 def get_total_messages(df: pd.DataFrame):
     return df['content'].notna().sum()
@@ -128,10 +153,10 @@ def count_messages_sent(df: pd.DataFrame):
 def count_most_frequent(df: pd.DataFrame):
     return df['content'].value_counts().head(20)
 
-def get_messages_per_index(df: pd.DataFrame, index: str):
+def get_messages_per_index(df: pd.DataFrame, index: str = "D"):
     return df.set_index("datetime").resample(index).size()
 
-def most_active_days(df: pd.DataFrame, num: int):
+def most_active_days(df: pd.DataFrame, num: int = 10):
     return get_messages_per_index(df, "D").sort_values(ascending=False).head(num)
 
 def average_message_length(df: pd.DataFrame):
@@ -188,7 +213,7 @@ def get_message_streaks(df: pd.DataFrame):
     }
 
 
-def day_time_graph(df: pd.DataFrame):
+def day_time_graph(df: pd.DataFrame, output_dir: str):
     df['day_of_week'] = df['datetime'].dt.day_name()
     df['hour'] = df['datetime'].dt.hour
     
@@ -199,7 +224,8 @@ def day_time_graph(df: pd.DataFrame):
         aggfunc='count',
     )
     days_order = ['Monday', 'Tuesday', 'Wednesday', 'Thursday', 'Friday', 'Saturday', 'Sunday']
-    pivot_table = pivot_table.reindex(days_order)
+    pivot_table = pivot_table.reindex(index=days_order, fill_value=0)
+    pivot_table = pivot_table.reindex(columns=np.arange(24), fill_value=0)
     pivot_table = pivot_table.fillna(0).astype(int)
 
     data = pivot_table.to_numpy()
@@ -226,9 +252,11 @@ def day_time_graph(df: pd.DataFrame):
     ax.set_xlabel('Hour of Day')
     ax.set_ylabel('Day of Week')
 
-    plt.savefig("day_time_graph.png", bbox_inches='tight', pad_inches=0.5)
+    output_path = os.path.join(output_dir, "day_time_graph.png")
+    plt.savefig(output_path, bbox_inches='tight', pad_inches=0.5)
+    plt.close()
 
-def build_freq_graph(df: pd.DataFrame, index: str):
+def build_freq_graph(df: pd.DataFrame, output_dir: str, index: str = "D"):
     frequency = get_messages_per_index(df, index)
     plt.figure(figsize=(12,6))
     frequency.plot()
@@ -237,11 +265,12 @@ def build_freq_graph(df: pd.DataFrame, index: str):
     plt.ylabel("Message Count")
     plt.tight_layout()
 
-    plt.savefig("messages_per_day.png", bbox_inches='tight', pad_inches=0.5)
+    output_path = os.path.join(output_dir, "messages_per_day.png")
+    plt.savefig(output_path, bbox_inches='tight', pad_inches=0.5)
+    plt.close()
 
-def generate_wordcloud(df: pd.DataFrame):
+def generate_wordcloud(df: pd.DataFrame, output_dir: str):
     all_words = df['content'].dropna().apply(clean_text)
-
     all_words = all_words[all_words.str.len() > 0]
 
     freq = Counter(all_words)
@@ -255,17 +284,70 @@ def generate_wordcloud(df: pd.DataFrame):
         font_step=2,
         max_words=200,
         relative_scaling=0.25,
-        min_font_size=40
+        min_font_size=40,
+        random_state=22
     )
     wordcloud.generate_from_frequencies(freq)
+
+    output_path = os.path.join(output_dir, "wordcloud.png")
+    wordcloud.to_file(output_path)
+
+analysis_functions = {
+    "total_messages": get_total_messages,
+    "messages_sent": count_messages_sent,
+    "most_frequent": count_most_frequent,
+    "most_active_days": most_active_days,
+    "average_message_length": average_message_length,
+    "message_streaks": get_message_streaks
+}
+
+plot_functions = [
+    day_time_graph,
+    build_freq_graph,
+    generate_wordcloud
+]
+
+def process_folder(folder: str):
+    files = find_all_files(folder)
+
+    person_name = os.path.basename(folder).rsplit('_', 1)[0]
+    person_result_dir = make_unique_dir(result_folder, person_name)
+    os.makedirs(person_result_dir, exist_ok=True)
+
+    print(f"Processing {person_name}...")
+    data = read_json_files(files)
+
+    results = {}
+    for key, func in analysis_functions.items():
+        try:
+            results[key] = func(data)
+        except Exception as e:
+            print(f"Error in {key} for {person_name}: {e}")
+            results[key] = None
     
-    plt.figure(figsize=(20, 10), dpi=300)
-    plt.imshow(wordcloud)
-    plt.axis('off')
-    plt.savefig("wordcloud.png", bbox_inches='tight', pad_inches=0.5)
+    json_path = os.path.join(person_result_dir, "analysis_results.json")
+    with open(json_path, 'wb') as f:
+        f.write(orjson.dumps(results, option=orjson.OPT_INDENT_2, default=default))
+    
+    for plot_func in plot_functions:
+        try:
+            plot_func(data, person_result_dir)
+        except Exception as e:
+            print(f"Error in plotting function {plot_func.__name__} for {person_name}: {e}")
+
 
 if __name__ == "__main__":
-    word = "💔👎👍Hello🤓🤓"
+    word = "💔👎👍Hello🤓🤓👩‍👩‍👧"
+    #print(len(word))
+    #print(grapheme.length(word))
+    start = time.time()
 
-    files = find_all_files(r"YOUR_FOLDER_PATH_HERE")
-    data = read_json_files(files)
+    main_folder = r"YOUR-INSTAGRAM-DOWNLOAD-FOLDER-HERE" # It will be of the format "whereever you stored\your_instagram_activity\messages\inbox"
+    result_folder = r"YOUR-RESULT-FOLDER-HERE" # Put the path of the folder where you want to store the results
+    folders = find_all_folder(main_folder)
+
+    with ThreadPoolExecutor() as executor:
+        executor.map(process_folder, folders)
+        
+    end = time.time()
+    print(f"Execution Time: {end - start:.2f} seconds")
