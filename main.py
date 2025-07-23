@@ -342,12 +342,20 @@ if __name__ == "__main__":
     #print(grapheme.length(word))
     start = time.time()
 
-    main_folder = r"YOUR-INSTAGRAM-DOWNLOAD-FOLDER-HERE" # It will be of the format "whereever you stored\your_instagram_activity\messages\inbox"
-    result_folder = r"YOUR-RESULT-FOLDER-HERE" # Put the path of the folder where you want to store the results
+    # Comment off the option you don't use with ''' ''' at the start and end of the block
+    # Option 1: Process all inbox folders
+    main_folder = r"YOUR-INSTAGRAM-DOWNLOAD-FOLDER-HERE"  # Path to the main inbox folder
+    result_folder = r"YOUR-RESULT-FOLDER-HERE"  # Path to store the results
     folders = find_all_folder(main_folder)
 
+    print("Processing all inbox folders...")
     with ThreadPoolExecutor() as executor:
         executor.map(process_folder, folders)
-        
+
+    # Option 2: Process a single folder
+    single_folder = r"YOUR-SINGLE-FOLDER-HERE"  # Path to a specific folder (e.g., one DM or group chat)
+    print(f"Processing single folder: {os.path.basename(single_folder)}...")
+    process_folder(single_folder)
+
     end = time.time()
     print(f"Execution Time: {end - start:.2f} seconds")
