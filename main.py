@@ -128,12 +128,21 @@ def preserve_attachment_phrases(s: str):
     return s
 
 def default(obj):
-    if hasattr(obj, "tolist"):
-        return obj.tolist()
-    if hasattr(obj, "isoformat"):
-        return obj.isoformat()
+    if isinstance(obj, pd.DataFrame):
+        return obj.to_dict(orient="records") 
+    if isinstance(obj, pd.Series):
+        return obj.to_dict()
+    if isinstance(obj, pd.Timestamp):
+        return obj.isoformat() if not pd.isna(obj) else None
+    if isinstance(obj, np.integer):
+        return int(obj)
+    if isinstance(obj, np.floating):
+        return float(obj)
+    if isinstance(obj, (np.ndarray, list, tuple)):
+        return [default(x) for x in obj]
+    if pd.isna(obj):
+        return None
     raise TypeError(f"Type {type(obj)} not serializable")
-
 
 def get_total_messages(df: pd.DataFrame):
     return df['content'].notna().sum()
@@ -143,25 +152,26 @@ def get_message_count(df: pd.DataFrame, text: str):
 
 def count_messages_sent(df: pd.DataFrame):
     numbers = df.value_counts('sender_name')
-    proportions = df.value_counts('sender_name', True)
+    proportions = df.value_counts('sender_name', True).round(3)
 
     return {
         "message_per_user": numbers,
         "message_proportions": proportions
     }
 
-def count_most_frequent(df: pd.DataFrame):
+def get_most_frequent_messages(df: pd.DataFrame):
     return df['content'].value_counts().head(20)
 
 def get_messages_per_index(df: pd.DataFrame, index: str = "D"):
     return df.set_index("datetime").resample(index).size()
 
-def most_active_days(df: pd.DataFrame, num: int = 10):
-    return get_messages_per_index(df, "D").sort_values(ascending=False).head(num)
+def most_active_days(df: pd.DataFrame, num: int = 10) -> list[dict]:
+    s = get_messages_per_index(df, "D").sort_values(ascending=False).head(num)
+    return [{"date": str(date.date()), "messages": int(count)} for date, count in s.items()]
 
 def average_message_length(df: pd.DataFrame):
     df['content_length'] = df['content'].apply(lambda x: grapheme.length(x) if isinstance(x, str) else 0)
-    avg_lengths = df.groupby('sender_name')['content_length'].mean()
+    avg_lengths = df.groupby('sender_name')['content_length'].mean().astype(int)
     
     return avg_lengths
 
@@ -202,13 +212,13 @@ def get_message_streaks(df: pd.DataFrame):
     return {
     "max_message_streak": {
         "length": max_streak,
-        "start": max_streak_start,
-        "end": max_streak_end
+        "start": max_streak_start.date() if max_streak_start else None,
+        "end": max_streak_end.date() if max_streak_end else None
     },
     "max_gap": {
         "length": max_gap,
-        "start": max_gap_start,
-        "end": max_gap_end
+        "start": max_gap_start.date() if max_gap_start else None,
+        "end": max_gap_end.date() if max_gap_end else None
     }
     }
 
@@ -231,7 +241,7 @@ def day_time_graph(df: pd.DataFrame, output_dir: str):
     data = pivot_table.to_numpy()
 
     fig, ax = plt.subplots(figsize=(14, 6))
-    cax = ax.imshow(data, aspect='auto', cmap='YlOrRd')
+    cax = ax.imshow(data, aspect='auto', cmap='Blues')
 
     ax.set_xticks(np.arange(24))
     ax.set_yticks(np.arange(len(days_order)))
@@ -295,7 +305,7 @@ def generate_wordcloud(df: pd.DataFrame, output_dir: str):
 analysis_functions = {
     "total_messages": get_total_messages,
     "messages_sent": count_messages_sent,
-    "most_frequent": count_most_frequent,
+    "most_frequent_messages": get_most_frequent_messages,
     "most_active_days": most_active_days,
     "average_message_length": average_message_length,
     "message_streaks": get_message_streaks
@@ -342,18 +352,20 @@ if __name__ == "__main__":
     #print(grapheme.length(word))
     start = time.time()
 
-    # Comment off the option you don't use with ''' ''' at the start and end of the block
+    # Comment off the option you don't use with #
     # Option 1: Process all inbox folders
-    main_folder = r"YOUR-INSTAGRAM-DOWNLOAD-FOLDER-HERE"  # Path to the main inbox folder
-    result_folder = r"YOUR-RESULT-FOLDER-HERE"  # Path to store the results
+    main_folder = r"YOUR-INSTAGRAM-DOWNLOAD-FOLDER-HERE"  # Path to the main inbox folder, it should end in "/messages/inbox"
+    result_folder = r"YOUR-RESULT-FOLDER-HERE"  # Path of folder to store the results 
     folders = find_all_folder(main_folder)
 
     print("Processing all inbox folders...")
     with ThreadPoolExecutor() as executor:
         executor.map(process_folder, folders)
 
+    
     # Option 2: Process a single folder
     single_folder = r"YOUR-SINGLE-FOLDER-HERE"  # Path to a specific folder (e.g., one DM or group chat)
+    result_folder = r"YOUR-RESULT-FOLDER-HERE"  # Path to store the results
     print(f"Processing single folder: {os.path.basename(single_folder)}...")
     process_folder(single_folder)
 

@@ -99,6 +99,8 @@ And make sure the **single folder** block below is commented out:
 
 ```python
 # single_folder = r"YOUR-SINGLE-FOLDER-HERE"  # e.g., r"C:\Users\You\instagram\inbox\johndoe_123"
+# result_folder = r"YOUR-RESULT-FOLDER-HERE"  # Path to store the results
+
 # print(f"Processing single folder: {os.path.basename(single_folder)}...")
 # process_folder(single_folder)
 ```
@@ -193,16 +195,35 @@ If a folder name already exists, a numeric suffix is added automatically (e.g., 
       "Bob": 0.541
     }
   },
-  "most_frequent": {
+  "most_frequent_messages": {
     "lol": 32,
     "yeah": 28,
-    ...
+    "okay": 25,
+    "sure": 22,
+    "thanks": 20
   },
-  "most_active_days": {
-    "2021-05-14": 40,
-    "2021-03-20": 35,
-    ...
-  },
+  "most_active_days": [
+    {
+      "date": "2021-05-14",
+      "messages": 40
+    },
+    {
+      "date": "2021-03-20",
+      "messages": 35
+    },
+    {
+      "date": "2021-04-02",
+      "messages": 33
+    },
+    {
+      "date": "2021-06-18",
+      "messages": 32
+    },
+    {
+      "date": "2021-05-01",
+      "messages": 30
+    }
+  ],
   "average_message_length": {
     "Alice": 12.3,
     "Bob": 15.8
