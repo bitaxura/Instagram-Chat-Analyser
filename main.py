@@ -1,18 +1,20 @@
 import os
-import regex as re
 import time
+from collections import Counter
 from concurrent.futures import ThreadPoolExecutor
+from typing import Any
 
+import grapheme
 import numpy as np
+import orjson
+import pandas as pd
+import regex as re
+import spacy
+from wordcloud import WordCloud
 import matplotlib
 matplotlib.use('Agg')
 import matplotlib.pyplot as plt
-import spacy
-import orjson
-import pandas as pd
-from wordcloud import WordCloud
-from collections import Counter
-import grapheme
+
 
 url_pattern = re.compile(r'https?://\S+|www\.\S+')
 punct_pattern = re.compile(r'[^\w\s\U0001F300-\U0001F6FF\U0001F900-\U0001F9FF]')
@@ -43,19 +45,19 @@ stop_words = {
 }
 
 nlp = spacy.blank("en")
-font_path = "C:\\Windows\\Fonts\\seguiemj.ttf"
+SYS_FONT_PATH = "C:\\Windows\\Fonts\\seguiemj.ttf"
 
-def find_all_folder(folder_path: str):
+def find_all_folder(folder_path: str) -> list[str]:
     all_folders = os.listdir(folder_path)
     folders = [os.path.join(folder_path, f) for f in all_folders if os.path.isdir(os.path.join(folder_path, f))]
     return folders
 
-def find_all_files(folder_path: str):
+def find_all_files(folder_path: str) -> list[str]:
     all_files = os.listdir(folder_path)
     files = [os.path.join(folder_path, f) for f in all_files if f.endswith('.json')]
     return files
 
-def make_unique_dir(base_dir, desired_name):
+def make_unique_dir(base_dir, desired_name) -> str:
     candidate = os.path.join(base_dir, desired_name)
     if not os.path.exists(candidate):
         return candidate
@@ -66,7 +68,7 @@ def make_unique_dir(base_dir, desired_name):
             return candidate_i
         i += 1
 
-def read_json_files(files: list[str]):
+def read_json_files(files: list[str]) -> pd.DataFrame:
     dfs = []
 
     for file in files:
@@ -83,7 +85,7 @@ def read_json_files(files: list[str]):
     combined_dataframe = combined_dataframe.sort_values(by='datetime')
     return combined_dataframe
 
-def clean_data(df: pd.DataFrame):
+def clean_data(df: pd.DataFrame) -> pd.DataFrame:
     cols_to_keep = ['sender_name', 'datetime', 'content', 'reactions', 'share.link', 'share.share_text', "share.original_content_owner", 'photos', 'audio_files']
 
     df['datetime'] = pd.to_datetime(df["timestamp_ms"], unit="ms", utc=True)
@@ -103,7 +105,7 @@ def clean_data(df: pd.DataFrame):
 
     return df
 
-def clean_text(text: str):
+def clean_text(text: str) -> str:
     text = url_pattern.sub('', text)
     text = punct_pattern.sub('', text)
     tokens = [token.text for token in nlp(text)]
@@ -112,18 +114,18 @@ def clean_text(text: str):
     output = [word for word in tokens if word not in stop_words]
     return ' '.join(output)
 
-def fix_emoji_encoding(s: str):
+def fix_emoji_encoding(s: str) -> str:
     try:
         return s.encode('latin1').decode('utf-8')
     except Exception:
         return s
 
-def looks_double_encoded(s):
+def looks_double_encoded(s: str) -> bool:
     if not isinstance(s, str):
         return False
     return any(128 <= ord(c) <= 255 for c in s)
 
-def preserve_attachment_phrases(s: str):
+def preserve_attachment_phrases(s: str) -> str:
     s = attachment_pattern.sub(r'\1_sent_an_attachment', s)
     return s
 
@@ -144,13 +146,13 @@ def default(obj):
         return None
     raise TypeError(f"Type {type(obj)} not serializable")
 
-def get_total_messages(df: pd.DataFrame):
+def get_total_messages(df: pd.DataFrame) -> int:
     return df['content'].notna().sum()
 
-def get_message_count(df: pd.DataFrame, text: str):
+def get_message_count(df: pd.DataFrame, text: str) -> int:
     return df['content'].str.contains(text, case=False, na=False).sum()
 
-def count_messages_sent(df: pd.DataFrame):
+def count_messages_sent(df: pd.DataFrame) -> dict[str, int]:
     numbers = df.value_counts('sender_name')
     proportions = df.value_counts('sender_name', True).round(3)
 
@@ -159,27 +161,27 @@ def count_messages_sent(df: pd.DataFrame):
         "message_proportions": proportions
     }
 
-def get_most_frequent_messages(df: pd.DataFrame):
+def get_most_frequent_messages(df: pd.DataFrame) -> pd.Series:
     return df['content'].value_counts().head(20)
 
-def get_messages_per_index(df: pd.DataFrame, index: str = "D"):
+def get_messages_per_index(df: pd.DataFrame, index: str = "D") -> pd.Series:
     return df.set_index("datetime").resample(index).size()
 
 def most_active_days(df: pd.DataFrame, num: int = 10) -> list[dict]:
     s = get_messages_per_index(df, "D").sort_values(ascending=False).head(num)
     return [{"date": str(date.date()), "messages": int(count)} for date, count in s.items()]
 
-def average_message_length(df: pd.DataFrame):
+def average_message_length(df: pd.DataFrame) -> pd.Series:
     df['content_length'] = df['content'].apply(lambda x: grapheme.length(x) if isinstance(x, str) else 0)
     avg_lengths = df.groupby('sender_name')['content_length'].mean().astype(int)
-    
+
     return avg_lengths
 
-def get_message_streaks(df: pd.DataFrame):
+def get_message_streaks(df: pd.DataFrame) -> dict[str, dict[str, Any]]:
     dates = df["datetime"].dt.normalize().drop_duplicates()
     data_range = pd.date_range(dates.min(), dates.max(), freq = "D")
     sent_range = data_range.isin(dates)
-    
+
     max_streak = current_streak = 0
     streak_start = max_streak_start = max_streak_end = None
 
@@ -223,10 +225,10 @@ def get_message_streaks(df: pd.DataFrame):
     }
 
 
-def day_time_graph(df: pd.DataFrame, output_dir: str):
+def day_time_graph(df: pd.DataFrame, output_dir: str) -> None:
     df['day_of_week'] = df['datetime'].dt.day_name()
     df['hour'] = df['datetime'].dt.hour
-    
+
     pivot_table = df.pivot_table(
         index='day_of_week',
         columns='hour',
@@ -266,7 +268,7 @@ def day_time_graph(df: pd.DataFrame, output_dir: str):
     plt.savefig(output_path, bbox_inches='tight', pad_inches=0.5)
     plt.close()
 
-def build_freq_graph(df: pd.DataFrame, output_dir: str, index: str = "D"):
+def build_freq_graph(df: pd.DataFrame, output_dir: str, index: str = "D") -> None:
     frequency = get_messages_per_index(df, index)
     plt.figure(figsize=(12,6))
     frequency.plot()
@@ -279,23 +281,22 @@ def build_freq_graph(df: pd.DataFrame, output_dir: str, index: str = "D"):
     plt.savefig(output_path, bbox_inches='tight', pad_inches=0.5)
     plt.close()
 
-def generate_wordcloud(df: pd.DataFrame, output_dir: str):
+def generate_wordcloud(df: pd.DataFrame, output_dir: str) -> None:
     all_words = df['content'].dropna().apply(clean_text)
     all_words = all_words[all_words.str.len() > 0]
 
     freq = Counter(all_words)
-    
+
     wordcloud = WordCloud(
         width=2000,
         height=1000,
         background_color='white',
         collocations=False,
-        font_path=font_path,
+        font_path=SYS_FONT_PATH,
         font_step=2,
         max_words=200,
         relative_scaling=0.25,
-        min_font_size=40,
-        random_state=22
+        min_font_size=40
     )
     wordcloud.generate_from_frequencies(freq)
 
@@ -317,7 +318,7 @@ plot_functions = [
     generate_wordcloud
 ]
 
-def process_folder(folder: str):
+def process_folder(folder: str) -> None:
     files = find_all_files(folder)
 
     person_name = os.path.basename(folder).rsplit('_', 1)[0]
@@ -334,11 +335,11 @@ def process_folder(folder: str):
         except Exception as e:
             print(f"Error in {key} for {person_name}: {e}")
             results[key] = None
-    
+
     json_path = os.path.join(person_result_dir, "analysis_results.json")
     with open(json_path, 'wb') as f:
         f.write(orjson.dumps(results, option=orjson.OPT_INDENT_2, default=default))
-    
+
     for plot_func in plot_functions:
         try:
             plot_func(data, person_result_dir)
