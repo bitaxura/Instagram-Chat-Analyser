@@ -242,3 +242,10 @@ If a folder name already exists, a numeric suffix is added automatically (e.g., 
   }
 }
 ```
+---
+## Known Issues
+* Chats with no messages or just images do not work at all
+---
+
+## License
+This project is licensed under the MIT License. See the [LICENSE](LICENSE) file for details.
