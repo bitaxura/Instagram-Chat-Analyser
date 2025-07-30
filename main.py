@@ -1,6 +1,6 @@
 import os
 import time
-from collections import Counter
+from collections import Counter, defaultdict
 from concurrent.futures import ThreadPoolExecutor
 from typing import Any
 
@@ -15,6 +15,7 @@ import matplotlib
 matplotlib.use('Agg')
 import matplotlib.pyplot as plt
 
+function_timings = defaultdict(float)
 
 url_pattern = re.compile(r'https?://\S+|www\.\S+')
 punct_pattern = re.compile(r'[^\w\s\U0001F300-\U0001F6FF\U0001F900-\U0001F9FF]')
@@ -47,88 +48,115 @@ stop_words = {
 nlp = spacy.blank("en")
 SYS_FONT_PATH = "C:\\Windows\\Fonts\\seguiemj.ttf"
 
-def find_all_folder(folder_path: str) -> list[str]:
-    all_folders = os.listdir(folder_path)
-    folders = [os.path.join(folder_path, f) for f in all_folders if os.path.isdir(os.path.join(folder_path, f))]
-    return folders
+def timeit(name):
+    def decorator(func):
+        def wrapper(*args, **kwargs):
+            start = time.time()
+            result = func(*args, **kwargs)
+            function_timings[name] += time.time() - start
+            return result
+        return wrapper
+    return decorator
 
-def find_all_files(folder_path: str) -> list[str]:
-    all_files = os.listdir(folder_path)
-    files = [os.path.join(folder_path, f) for f in all_files if f.endswith('.json')]
-    return files
+class FileOperations:
+    @staticmethod
+    @timeit("find_all_folder")
+    def find_all_folder(folder_path: str) -> list[str]:
+        all_folders = os.listdir(folder_path)
+        folders = [os.path.join(folder_path, f) for f in all_folders if os.path.isdir(os.path.join(folder_path, f))]
+        return folders
 
-def make_unique_dir(base_dir, desired_name) -> str:
-    candidate = os.path.join(base_dir, desired_name)
-    if not os.path.exists(candidate):
-        return candidate
-    i = 1
-    while True:
-        candidate_i = os.path.join(base_dir, f"{desired_name}{i}")
-        if not os.path.exists(candidate_i):
-            return candidate_i
-        i += 1
+    @staticmethod  
+    @timeit("find_all_files")
+    def find_all_files(folder_path: str) -> list[str]:
+        all_files = os.listdir(folder_path)
+        files = [os.path.join(folder_path, f) for f in all_files if f.endswith('.json')]
+        return files
 
-def read_json_files(files: list[str]) -> pd.DataFrame:
-    dfs = []
+    @staticmethod
+    @timeit("make_unique_dir")
+    def make_unique_dir(base_dir, desired_name) -> str:
+        candidate = os.path.join(base_dir, desired_name)
+        if not os.path.exists(candidate):
+            return candidate
+        i = 1
+        while True:
+            candidate_i = os.path.join(base_dir, f"{desired_name}{i}")
+            if not os.path.exists(candidate_i):
+                return candidate_i
+            i += 1
 
-    for file in files:
-        with open(file, 'rb') as f:
-            data = orjson.loads(f.read())
-        messages = data.get('messages')
-        df = pd.json_normalize(messages)
+class DataProcessor:
+    @staticmethod
+    def read_json_files(files: list[str]) -> pd.DataFrame:
+        dfs = []
 
-        df = clean_data(df)
+        for file in files:
+            with open(file, 'rb') as f:
+                data = orjson.loads(f.read())
+            messages = data.get('messages')
+            df = pd.json_normalize(messages)
 
-        dfs.append(df)
+            df = DataProcessor.clean_data(df)
 
-    combined_dataframe = pd.concat(dfs, ignore_index=True)
-    combined_dataframe = combined_dataframe.sort_values(by='datetime')
-    return combined_dataframe
+            dfs.append(df)
 
-def clean_data(df: pd.DataFrame) -> pd.DataFrame:
-    cols_to_keep = ['sender_name', 'datetime', 'content', 'reactions', 'share.link', 'share.share_text', "share.original_content_owner", 'photos', 'audio_files']
+        combined_dataframe = pd.concat(dfs, ignore_index=True)
+        combined_dataframe = combined_dataframe.sort_values(by='datetime')
+        return combined_dataframe
 
-    df['datetime'] = pd.to_datetime(df["timestamp_ms"], unit="ms", utc=True)
-    df['datetime'] = df['datetime'].dt.tz_convert('America/New_York')
+    @staticmethod
+    def clean_data(df: pd.DataFrame) -> pd.DataFrame:
+        cols_to_keep = ['sender_name', 'datetime', 'content', 'reactions', 'share.link', 'share.share_text', "share.original_content_owner", 'photos', 'audio_files']
 
-    df = df[[col for col in cols_to_keep if col in df.columns]]
+        df['datetime'] = pd.to_datetime(df["timestamp_ms"], unit="ms", utc=True)
+        df['datetime'] = df['datetime'].dt.tz_convert('America/New_York')
 
-    df = df[~df['content'].str.lower().str.endswith('liked a message', na=False)]
-    df = df[~df['content'].str.lower().str.strip().str.endswith('to your message', na=False)]
-    df = df[~df['content'].str.contains('This poll is no longer available.', na=False)]
+        df = df[[col for col in cols_to_keep if col in df.columns]]
+        df = df[df['sender_name'] != 'Meta AI']
 
-    attachment_mask = df['content'].str.contains('sent an attachment', na=False)
-    df.loc[attachment_mask, 'content'] = df.loc[attachment_mask, 'content'].apply(preserve_attachment_phrases)
+        df = df[~df['content'].str.lower().str.endswith('liked a message', na=False)]
+        df = df[~df['content'].str.lower().str.strip().str.endswith('to your message', na=False)]
+        df = df[~df['content'].str.contains('This poll is no longer available.', na=False)]
 
-    emoji_mask = df['content'].apply(looks_double_encoded)
-    df.loc[emoji_mask, 'content'] = df.loc[emoji_mask, 'content'].apply(fix_emoji_encoding)
+        attachment_mask = df['content'].str.contains('sent an attachment', na=False)
+        df.loc[attachment_mask, 'content'] = df.loc[attachment_mask, 'content'].apply(TextProcessor.preserve_attachment_phrases)
 
-    return df
+        emoji_mask = df['content'].apply(TextProcessor.looks_double_encoded)
+        df.loc[emoji_mask, 'content'] = df.loc[emoji_mask, 'content'].apply(TextProcessor.fix_emoji_encoding)
 
-def clean_text(text: str) -> str:
-    text = url_pattern.sub('', text)
-    text = punct_pattern.sub('', text)
-    tokens = [token.text for token in nlp(text)]
-    tokens = [word.strip() for word in tokens]
+        return df
 
-    output = [word for word in tokens if word not in stop_words]
-    return ' '.join(output)
+class TextProcessor:
+    @staticmethod
+    def clean_text(text: str) -> str:
+        text = url_pattern.sub('', text)
+        text = punct_pattern.sub('', text)
+        tokens = [token.text for token in nlp(text)]
+        tokens = [word.strip() for word in tokens]
 
-def fix_emoji_encoding(s: str) -> str:
-    try:
-        return s.encode('latin1').decode('utf-8')
-    except Exception:
+        output = [word for word in tokens if word not in stop_words]
+        return ' '.join(output)
+
+    @staticmethod
+    def fix_emoji_encoding(s: str) -> str:
+        try:
+            return s.encode('latin1').decode('utf-8')
+        except Exception:
+            return s
+
+    @staticmethod
+    def looks_double_encoded(s: str) -> bool:
+        if not isinstance(s, str):
+            return False
+        return any(128 <= ord(c) <= 255 for c in s)
+
+    @staticmethod
+    def preserve_attachment_phrases(s: str) -> str:
+        s = attachment_pattern.sub(r'\1_sent_an_attachment', s)
         return s
 
-def looks_double_encoded(s: str) -> bool:
-    if not isinstance(s, str):
-        return False
-    return any(128 <= ord(c) <= 255 for c in s)
-
-def preserve_attachment_phrases(s: str) -> str:
-    s = attachment_pattern.sub(r'\1_sent_an_attachment', s)
-    return s
-
+@timeit("default")
 def default(obj):
     if isinstance(obj, pd.DataFrame):
         return obj.to_dict(orient="records") 
@@ -146,187 +174,213 @@ def default(obj):
         return None
     raise TypeError(f"Type {type(obj)} not serializable")
 
-def get_total_messages(df: pd.DataFrame) -> int:
-    return df['content'].notna().sum()
 
-def get_message_count(df: pd.DataFrame, text: str) -> int:
-    return df['content'].str.contains(text, case=False, na=False).sum()
+class Analyzer:
+    @staticmethod
+    @timeit("get_total_messages")
+    def get_total_messages(df: pd.DataFrame) -> int:
+        return df['content'].notna().sum()
 
-def count_messages_sent(df: pd.DataFrame) -> dict[str, int]:
-    numbers = df.value_counts('sender_name')
-    proportions = df.value_counts('sender_name', True).round(3)
+    @staticmethod
+    @timeit("get_message_count")
+    def get_message_count(df: pd.DataFrame, text: str) -> int:
+        return df['content'].str.contains(text, case=False, na=False).sum()
 
-    return {
-        "message_per_user": numbers,
-        "message_proportions": proportions
-    }
+    @staticmethod
+    @timeit("count_messages_sent")
+    def count_messages_sent(df: pd.DataFrame) -> dict[str, int]:
+        numbers = df.value_counts('sender_name')
+        proportions = df.value_counts('sender_name', True).round(3)
 
-def get_most_frequent_messages(df: pd.DataFrame) -> pd.Series:
-    return df['content'].value_counts().head(20)
+        return {
+            "message_per_user": numbers,
+            "message_proportions": proportions
+        }
 
-def get_messages_per_index(df: pd.DataFrame, index: str = "D") -> pd.Series:
-    return df.set_index("datetime").resample(index).size()
+    @staticmethod
+    @timeit("get_most_frequent_messages")
+    def get_most_frequent_messages(df: pd.DataFrame) -> pd.Series:
+        return df['content'].value_counts().head(20) 
 
-def most_active_days(df: pd.DataFrame, num: int = 10) -> list[dict]:
-    s = get_messages_per_index(df, "D").sort_values(ascending=False).head(num)
-    return [{"date": str(date.date()), "messages": int(count)} for date, count in s.items()]
+    @staticmethod
+    @timeit("get_messages_per_index")
+    def get_messages_per_index(df: pd.DataFrame, index: str = "D") -> pd.Series:
+        return df.set_index("datetime").resample(index).size()
 
-def average_message_length(df: pd.DataFrame) -> pd.Series:
-    df['content_length'] = df['content'].apply(lambda x: grapheme.length(x) if isinstance(x, str) else 0)
-    avg_lengths = df.groupby('sender_name')['content_length'].mean().astype(int)
+    @staticmethod
+    @timeit("most_active_days")
+    def most_active_days(df: pd.DataFrame, num: int = 10) -> list[dict]:
+        s = Analyzer.get_messages_per_index(df, "D").sort_values(ascending=False).head(num)
+        return [{"date": str(date.date()), "messages": int(count)} for date, count in s.items()]
 
-    return avg_lengths
+    @staticmethod
+    @timeit("average_message_length")
+    def average_message_length(df: pd.DataFrame) -> pd.Series:
+        df['content_length'] = df['content'].apply(lambda x: grapheme.length(x) if isinstance(x, str) else 0)
+        avg_lengths = df.groupby('sender_name')['content_length'].mean().astype(int)
 
-def get_message_streaks(df: pd.DataFrame) -> dict[str, dict[str, Any]]:
-    dates = df["datetime"].dt.normalize().drop_duplicates()
-    data_range = pd.date_range(dates.min(), dates.max(), freq = "D")
-    sent_range = data_range.isin(dates)
+        return avg_lengths
 
-    max_streak = current_streak = 0
-    streak_start = max_streak_start = max_streak_end = None
+    @staticmethod
+    @timeit("get_message_streaks")
+    def get_message_streaks(df: pd.DataFrame) -> dict[str, dict[str, Any]]:
+        dates = df["datetime"].dt.normalize().drop_duplicates()
+        data_range = pd.date_range(dates.min(), dates.max(), freq="D")
+        sent_range = data_range.isin(dates)
 
-    max_gap = current_gap = 0
-    gap_start = max_gap_start = max_gap_end = None
+        max_streak = current_streak = 0
+        streak_start = max_streak_start = max_streak_end = None
 
-    for i, sent in enumerate(sent_range):
-        date = data_range[i]
-        if sent:
-            if current_streak == 0:
-                streak_start = date
-            current_streak += 1
-            if current_streak > max_streak:
-                max_streak = current_streak
-                max_streak_start = streak_start
-                max_streak_end = date
+        max_gap = current_gap = 0
+        gap_start = max_gap_start = max_gap_end = None
 
-            current_gap = 0
-        else:
-            if current_gap == 0:
-                gap_start = date
-            current_gap += 1
-            if current_gap > max_gap:
-                max_gap = current_gap
-                max_gap_start = gap_start
-                max_gap_end = date
+        for i, sent in enumerate(sent_range):
+            date = data_range[i]
+            if sent:
+                if current_streak == 0:
+                    streak_start = date
+                current_streak += 1
+                if current_streak > max_streak:
+                    max_streak = current_streak
+                    max_streak_start = streak_start
+                    max_streak_end = date
 
-            current_streak = 0
+                current_gap = 0
+            else:
+                if current_gap == 0:
+                    gap_start = date
+                current_gap += 1
+                if current_gap > max_gap:
+                    max_gap = current_gap
+                    max_gap_start = gap_start
+                    max_gap_end = date
 
-    return {
-    "max_message_streak": {
-        "length": max_streak,
-        "start": max_streak_start.date() if max_streak_start else None,
-        "end": max_streak_end.date() if max_streak_end else None
-    },
-    "max_gap": {
-        "length": max_gap,
-        "start": max_gap_start.date() if max_gap_start else None,
-        "end": max_gap_end.date() if max_gap_end else None
-    }
-    }
+                current_streak = 0
+
+        return {
+            "max_message_streak": {
+                "length": max_streak,
+                "start": max_streak_start.date() if max_streak_start else None,
+                "end": max_streak_end.date() if max_streak_end else None
+            },
+            "max_gap": {
+                "length": max_gap,
+                "start": max_gap_start.date() if max_gap_start else None,
+                "end": max_gap_end.date() if max_gap_end else None
+            }
+        }
 
 
-def day_time_graph(df: pd.DataFrame, output_dir: str) -> None:
-    df['day_of_week'] = df['datetime'].dt.day_name()
-    df['hour'] = df['datetime'].dt.hour
+class Visualizer:
+    @staticmethod
+    @timeit("day_time_graph")
+    def day_time_graph(df: pd.DataFrame, output_dir: str) -> None:
+        df['day_of_week'] = df['datetime'].dt.day_name()
+        df['hour'] = df['datetime'].dt.hour
 
-    pivot_table = df.pivot_table(
-        index='day_of_week',
-        columns='hour',
-        values='datetime',
-        aggfunc='count',
-    )
-    days_order = ['Monday', 'Tuesday', 'Wednesday', 'Thursday', 'Friday', 'Saturday', 'Sunday']
-    pivot_table = pivot_table.reindex(index=days_order, fill_value=0)
-    pivot_table = pivot_table.reindex(columns=np.arange(24), fill_value=0)
-    pivot_table = pivot_table.fillna(0).astype(int)
+        pivot_table = df.pivot_table(
+            index='day_of_week',
+            columns='hour',
+            values='datetime',
+            aggfunc='count',
+        )
+        days_order = ['Monday', 'Tuesday', 'Wednesday', 'Thursday', 'Friday', 'Saturday', 'Sunday']
+        pivot_table = pivot_table.reindex(index=days_order, fill_value=0)
+        pivot_table = pivot_table.reindex(columns=np.arange(24), fill_value=0)
+        pivot_table = pivot_table.fillna(0).astype(int)
 
-    data = pivot_table.to_numpy()
+        data = pivot_table.to_numpy()
 
-    fig, ax = plt.subplots(figsize=(14, 6))
-    cax = ax.imshow(data, aspect='auto', cmap='Blues')
+        fig, ax = plt.subplots(figsize=(14, 6))
+        cax = ax.imshow(data, aspect='auto', cmap='Blues')
 
-    ax.set_xticks(np.arange(24))
-    ax.set_yticks(np.arange(len(days_order)))
-    ax.set_xticklabels(pivot_table.columns)
-    ax.set_yticklabels(days_order)
+        ax.set_xticks(np.arange(24))
+        ax.set_yticks(np.arange(len(days_order)))
+        ax.set_xticklabels(pivot_table.columns)
+        ax.set_yticklabels(days_order)
 
-    plt.setp(ax.get_xticklabels(), rotation=45, ha="right", rotation_mode="anchor")
+        plt.setp(ax.get_xticklabels(), rotation=45, ha="right", rotation_mode="anchor")
 
-    cbar = fig.colorbar(cax)
-    cbar.set_label('Count')
+        cbar = fig.colorbar(cax)
+        cbar.set_label('Count')
 
-    for i in range(data.shape[0]):
-        for j in range(data.shape[1]):
-            value = int(data[i, j])
-            ax.text(j, i, str(value), ha='center', va='center', color='black', fontsize=8)
+        for i in range(data.shape[0]):
+            for j in range(data.shape[1]):
+                value = int(data[i, j])
+                ax.text(j, i, str(value), ha='center', va='center', color='black', fontsize=8)
 
-    ax.set_title('Activity by Day and Hour')
-    ax.set_xlabel('Hour of Day')
-    ax.set_ylabel('Day of Week')
+        ax.set_title('Activity by Day and Hour')
+        ax.set_xlabel('Hour of Day')
+        ax.set_ylabel('Day of Week')
 
-    output_path = os.path.join(output_dir, "day_time_graph.png")
-    plt.savefig(output_path, bbox_inches='tight', pad_inches=0.5)
-    plt.close()
+        output_path = os.path.join(output_dir, "day_time_graph.png")
+        plt.savefig(output_path, bbox_inches='tight', pad_inches=0.5)
+        plt.close()
 
-def build_freq_graph(df: pd.DataFrame, output_dir: str, index: str = "D") -> None:
-    frequency = get_messages_per_index(df, index)
-    plt.figure(figsize=(12,6))
-    frequency.plot()
-    plt.title("Messages Sent Per Day")
-    plt.xlabel("Date")
-    plt.ylabel("Message Count")
-    plt.tight_layout()
+    @staticmethod
+    @timeit("build_freq_graph")
+    def build_freq_graph(df: pd.DataFrame, output_dir: str, index: str = "D") -> None:
+        frequency = Analyzer.get_messages_per_index(df, index)
+        plt.figure(figsize=(12,6))
+        frequency.plot()
+        plt.title("Messages Sent Per Day")
+        plt.xlabel("Date")
+        plt.ylabel("Message Count")
+        plt.tight_layout()
 
-    output_path = os.path.join(output_dir, "messages_per_day.png")
-    plt.savefig(output_path, bbox_inches='tight', pad_inches=0.5)
-    plt.close()
+        output_path = os.path.join(output_dir, "messages_per_day.png")
+        plt.savefig(output_path, bbox_inches='tight', pad_inches=0.5)
+        plt.close()
 
-def generate_wordcloud(df: pd.DataFrame, output_dir: str) -> None:
-    all_words = df['content'].dropna().apply(clean_text)
-    all_words = all_words[all_words.str.len() > 0]
+    @staticmethod
+    @timeit("generate_wordcloud")
+    def generate_wordcloud(df: pd.DataFrame, output_dir: str) -> None:
+        all_words = df['content'].dropna().apply(TextProcessor.clean_text)
+        all_words = all_words[all_words.str.len() > 0]
 
-    freq = Counter(all_words)
+        freq = Counter(all_words)
 
-    wordcloud = WordCloud(
-        width=2000,
-        height=1000,
-        background_color='white',
-        collocations=False,
-        font_path=SYS_FONT_PATH,
-        font_step=2,
-        max_words=200,
-        relative_scaling=0.25,
-        min_font_size=40
-    )
-    wordcloud.generate_from_frequencies(freq)
+        wordcloud = WordCloud(
+            width=2000,
+            height=1000,
+            background_color='white',
+            collocations=False,
+            font_path=SYS_FONT_PATH,
+            font_step=2,
+            max_words=200,
+            relative_scaling=0.25,
+            min_font_size=40
+        )
+        wordcloud.generate_from_frequencies(freq)
 
-    output_path = os.path.join(output_dir, "wordcloud.png")
-    wordcloud.to_file(output_path)
+        output_path = os.path.join(output_dir, "wordcloud.png")
+        wordcloud.to_file(output_path)
 
 analysis_functions = {
-    "total_messages": get_total_messages,
-    "messages_sent": count_messages_sent,
-    "most_frequent_messages": get_most_frequent_messages,
-    "most_active_days": most_active_days,
-    "average_message_length": average_message_length,
-    "message_streaks": get_message_streaks
+    "total_messages": Analyzer.get_total_messages,
+    "messages_sent": Analyzer.count_messages_sent,
+    "most_frequent_messages": Analyzer.get_most_frequent_messages,
+    "most_active_days": Analyzer.most_active_days,
+    "average_message_length": Analyzer.average_message_length,
+    "message_streaks": Analyzer.get_message_streaks,
+    "days_active": Analyzer.days_active
 }
 
 plot_functions = [
-    day_time_graph,
-    build_freq_graph,
-    generate_wordcloud
+    Visualizer.day_time_graph,
+    Visualizer.build_freq_graph,
+    Visualizer.generate_wordcloud
 ]
 
 def process_folder(folder: str) -> None:
-    files = find_all_files(folder)
+    files = FileOperations.find_all_files(folder)
 
     person_name = os.path.basename(folder).rsplit('_', 1)[0]
-    person_result_dir = make_unique_dir(result_folder, person_name)
+    person_result_dir = FileOperations.make_unique_dir(result_folder, person_name)
     os.makedirs(person_result_dir, exist_ok=True)
 
     print(f"Processing {person_name}...")
-    data = read_json_files(files)
+    data = FileOperations.read_json_files(files)
 
     results = {}
     for key, func in analysis_functions.items():
@@ -355,20 +409,24 @@ if __name__ == "__main__":
 
     # Comment off the option you don't use with #
     # Option 1: Process all inbox folders
-    main_folder = r"YOUR-INSTAGRAM-DOWNLOAD-FOLDER-HERE"  # Path to the main inbox folder, it should end in "/messages/inbox"
+    main_folder = r"YOUR-MAIN-FOLDER-HERE"  # Path to the main inbox folder, it should end in "/messages/inbox"
     result_folder = r"YOUR-RESULT-FOLDER-HERE"  # Path of folder to store the results 
-    folders = find_all_folder(main_folder)
+    folders = FileOperations.find_all_folder(main_folder)
 
     print("Processing all inbox folders...")
     with ThreadPoolExecutor() as executor:
         executor.map(process_folder, folders)
 
+    print("\nFunction timings:")
+    for fname, t in sorted(function_timings.items(), key=lambda x: -x[1]):
+        print(f"{fname}: {t:.2f} seconds")
+
     
     # Option 2: Process a single folder
-    single_folder = r"YOUR-SINGLE-FOLDER-HERE"  # Path to a specific folder (e.g., one DM or group chat)
-    result_folder = r"YOUR-RESULT-FOLDER-HERE"  # Path to store the results
-    print(f"Processing single folder: {os.path.basename(single_folder)}...")
-    process_folder(single_folder)
+    # single_folder = r"YOUR-SINGLE-FOLDER-HERE"  # Path to a specific folder (e.g., one DM or group chat)
+    # result_folder = r"YOUR-RESULT-FOLDER-HERE"  # Path to store the results
+    # print(f"Processing single folder: {os.path.basename(single_folder)}...")
+    # process_folder(single_folder)
 
     end = time.time()
     print(f"Execution Time: {end - start:.2f} seconds")
