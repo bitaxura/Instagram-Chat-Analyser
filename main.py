@@ -15,45 +15,28 @@ import matplotlib
 matplotlib.use('Agg')
 import matplotlib.pyplot as plt
 
-function_timings = defaultdict(float)
+from config import (
+    function_timings, timing_lock, URL_PATTERN, PUNCT_PATTERN, EMOJI_PATTERN, 
+    ATTACHMENT_PATTERN, STOP_WORDS, SYS_FONT_PATH,
+    get_analysis_functions, get_plot_functions
+)
 
-url_pattern = re.compile(r'https?://\S+|www\.\S+')
-punct_pattern = re.compile(r'[^\w\s\U0001F300-\U0001F6FF\U0001F900-\U0001F9FF]')
-attachment_pattern = re.compile(r'\b(\w+)\s+sent an attachment\b')
-
-stop_words = {
-    'his', 'while', 'been', 'few', 'haven', "we've", 'is', 'which', "you'll", 'shan',
-    "hasn't", "you've", "you're", 'against', 'no', 'if', "they're", 'again', 'these',
-    'about', 'hers', "she'll", 'some', 'into', 'with', 'as', "hadn't", "haven't",
-    "doesn't", 'who', 'the', 'and', 'can', 'only', 'there', 'to', "he'll", "we're",
-    "couldn't", 'it', 'my', 'than', "she's", 'out', 'shouldn', 'don', 'once', 'o',
-    'itself', 'during', 'theirs', 're', "he's", "they'd", "won't", 'm', 'more',
-    'their', "it'll", "don't", 'very', 'where', "wouldn't", 'himself', 'here', 'him',
-    'me', 'from', 'was', 'not', 'for', 'by', 'should', 'own', 'through', 'i', 'those',
-    "they've", 'hadn', 'ain', 'mustn', "you'd", 'both', 'over', 'whom', 'below',
-    'mightn', "we'd", 'her', "i'll", 'd', 'most', "shouldn't", "she'd", 'at', 'our',
-    'further', 'll', 'because', 'above', 'on', 've', 'an', 'how', 'what', 'after',
-    'too', 'in', "mightn't", 'didn', 'same', 'yourselves', 'or', "should've", 'your',
-    'yourself', 'do', "that'll", "isn't", "needn't", 'down', 'won', 'aren', 'had',
-    "i'd", 'then', 'this', 'its', 'did', 'when', 'all', 'you', 'hasn', 'myself', 'up',
-    'each', "mustn't", 'a', 'any', "it'd", 'she', 'are', 'but', 'having', 'before',
-    'until', 'wasn', 'am', "shan't", 'couldn', 'weren', "i've", 'isn', "they'll",
-    "he'd", 'be', 't', 'ours', "it's", "aren't", 'he', 's', 'we', 'they', 'doing',
-    "wasn't", 'ma', 'being', 'under', 'why', "didn't", 'needn', 'of', 'between',
-    'other', 'were', 'does', 'doesn', 'herself', 'that', "we'll", "weren't", 'just',
-    'off', 'such', 'nor', 'will', 'them', "i'm", 'themselves', 'has', 'ourselves',
-    'yours', 'wouldn', 'now', 'have', 'so', 'nt'
-}
+url_pattern = URL_PATTERN
+punct_pattern = PUNCT_PATTERN  
+emoji_pattern = EMOJI_PATTERN
+attachment_pattern = ATTACHMENT_PATTERN
+stop_words = STOP_WORDS
 
 nlp = spacy.blank("en")
-SYS_FONT_PATH = "C:\\Windows\\Fonts\\seguiemj.ttf"
 
 def timeit(name):
     def decorator(func):
         def wrapper(*args, **kwargs):
             start = time.time()
             result = func(*args, **kwargs)
-            function_timings[name] += time.time() - start
+            
+            with timing_lock:
+                function_timings[name] += time.time() - start
             return result
         return wrapper
     return decorator
@@ -146,6 +129,11 @@ class TextProcessor:
             return s
 
     @staticmethod
+    def extract_emojis(s: str) -> str:
+        emojis = emoji_pattern.findall(s)
+        return ''.join(emojis)
+
+    @staticmethod
     def looks_double_encoded(s: str) -> bool:
         if not isinstance(s, str):
             return False
@@ -200,7 +188,7 @@ class Analyzer:
     @staticmethod
     @timeit("get_most_frequent_messages")
     def get_most_frequent_messages(df: pd.DataFrame) -> pd.Series:
-        return df['content'].value_counts().head(20) 
+        return df['content'].value_counts().head(20)
 
     @staticmethod
     @timeit("get_messages_per_index")
@@ -356,21 +344,8 @@ class Visualizer:
         output_path = os.path.join(output_dir, "wordcloud.png")
         wordcloud.to_file(output_path)
 
-analysis_functions = {
-    "total_messages": Analyzer.get_total_messages,
-    "messages_sent": Analyzer.count_messages_sent,
-    "most_frequent_messages": Analyzer.get_most_frequent_messages,
-    "most_active_days": Analyzer.most_active_days,
-    "average_message_length": Analyzer.average_message_length,
-    "message_streaks": Analyzer.get_message_streaks,
-    "days_active": Analyzer.days_active
-}
-
-plot_functions = [
-    Visualizer.day_time_graph,
-    Visualizer.build_freq_graph,
-    Visualizer.generate_wordcloud
-]
+analysis_functions = get_analysis_functions()
+plot_functions = get_plot_functions()
 
 def process_folder(folder: str) -> None:
     files = FileOperations.find_all_files(folder)
@@ -380,7 +355,7 @@ def process_folder(folder: str) -> None:
     os.makedirs(person_result_dir, exist_ok=True)
 
     print(f"Processing {person_name}...")
-    data = FileOperations.read_json_files(files)
+    data = DataProcessor.read_json_files(files)
 
     results = {}
     for key, func in analysis_functions.items():
