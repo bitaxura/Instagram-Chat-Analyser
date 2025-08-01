@@ -23,6 +23,28 @@ pip install -r requirements.txt
 
 ---
 
+## Project Structure
+
+The project is organized as follows:
+
+```
+IG Analyzer/
+├── main.py          # Main script to process Instagram DM data
+├── config.py        # Configuration file for setting up paths and parameters
+├── requirements.txt # List of Python dependencies
+├── README.md        # Project documentation
+└── LICENSE          # License file
+```
+
+Each file serves a specific purpose:
+
+- **main.py**: The entry point of the application. Contains the logic for processing all or single folders.
+- **config.py**: Stores configurable parameters like folder paths and other constants.
+- **requirements.txt**: Lists all the Python libraries required to run the project.
+- **README.md**: Provides detailed instructions on how to use the tool.
+- **LICENSE**: Specifies the licensing terms for the project.
+---
+
 ## How to Get Your Instagram Data
 
 To use this tool, you’ll need to download your Instagram data (specifically your messages). Here's how to do it:
