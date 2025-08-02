@@ -16,7 +16,7 @@ matplotlib.use('Agg')
 import matplotlib.pyplot as plt
 
 from config import (
-    function_timings, timing_lock, URL_PATTERN, PUNCT_PATTERN, EMOJI_PATTERN, 
+    function_timings, function_call_counts, timing_lock, URL_PATTERN, PUNCT_PATTERN, EMOJI_PATTERN, 
     ATTACHMENT_PATTERN, STOP_WORDS, SYS_FONT_PATH,
     get_analysis_functions, get_plot_functions
 )
@@ -37,6 +37,7 @@ def timeit(name):
             
             with timing_lock:
                 function_timings[name] += time.time() - start
+                function_call_counts[name] += 1
             return result
         return wrapper
     return decorator
@@ -143,6 +144,17 @@ class TextProcessor:
     def preserve_attachment_phrases(s: str) -> str:
         s = attachment_pattern.sub(r'\1_sent_an_attachment', s)
         return s
+    
+    @staticmethod
+    def filter_by_length(text: str, min_len=8, max_len=200) -> bool:
+        length = len(text.split())
+        return min_len <= length <= max_len
+    
+    @staticmethod
+    def normalize_repeats(text):
+        text = re.sub(r'(.)\1{2,}', r'\1\1', text)
+        text = re.sub(r'([!?])\1{1,}', r'\1', text)
+        return text
 
 @timeit("default")
 def default(obj):
@@ -258,24 +270,31 @@ class Analyzer:
             }
         }
 
+    @staticmethod
+    def days_active(df: pd.DataFrame) -> float:
+        df['date'] = df['datetime'].dt.date
+        active_days = df['date'].nunique()
+        total_days = (df['date'].max() - df['date'].min()).days + 1
+        return (active_days / total_days) * 100 if total_days > 0 else 0
+
 
 class Visualizer:
     @staticmethod
     @timeit("day_time_graph")
     def day_time_graph(df: pd.DataFrame, output_dir: str) -> None:
-        df['day_of_week'] = df['datetime'].dt.day_name()
-        df['hour'] = df['datetime'].dt.hour
+        temp_df = df[['datetime']].copy()
+        temp_df['day_of_week'] = temp_df['datetime'].dt.day_name()
+        temp_df['hour'] = temp_df['datetime'].dt.hour
 
-        pivot_table = df.pivot_table(
+        pivot_table = temp_df.pivot_table(
             index='day_of_week',
             columns='hour',
             values='datetime',
             aggfunc='count',
+            fill_value=0
         )
         days_order = ['Monday', 'Tuesday', 'Wednesday', 'Thursday', 'Friday', 'Saturday', 'Sunday']
-        pivot_table = pivot_table.reindex(index=days_order, fill_value=0)
-        pivot_table = pivot_table.reindex(columns=np.arange(24), fill_value=0)
-        pivot_table = pivot_table.fillna(0).astype(int)
+        pivot_table = pivot_table.reindex(index=days_order, columns=np.arange(24), fill_value=0)
 
         data = pivot_table.to_numpy()
 
@@ -283,8 +302,8 @@ class Visualizer:
         cax = ax.imshow(data, aspect='auto', cmap='Blues')
 
         ax.set_xticks(np.arange(24))
-        ax.set_yticks(np.arange(len(days_order)))
-        ax.set_xticklabels(pivot_table.columns)
+        ax.set_yticks(np.arange(7))
+        ax.set_xticklabels(np.arange(24))
         ax.set_yticklabels(days_order)
 
         plt.setp(ax.get_xticklabels(), rotation=45, ha="right", rotation_mode="anchor")
@@ -295,7 +314,10 @@ class Visualizer:
         for i in range(data.shape[0]):
             for j in range(data.shape[1]):
                 value = int(data[i, j])
-                ax.text(j, i, str(value), ha='center', va='center', color='black', fontsize=8)
+                if value > 0:
+                    color = 'white' if value > data.max() * 0.5 else 'black'
+                    ax.text(j, i, str(value), ha='center', va='center', 
+                            color=color, fontsize=8)
 
         ax.set_title('Activity by Day and Hour')
         ax.set_xlabel('Hour of Day')
