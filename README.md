@@ -1,17 +1,19 @@
 # Instagram DM Analyzer
 
-This tool analyzes Instagram direct message (DM) data downloaded from your account. It supports bulk processing of all conversations or analyzing one folder at a time. The script outputs statistical summaries, visualizations, and a word cloud for each conversation.
+This tool analyzes Instagram direct message (DM) data downloaded from your account. It supports bulk processing of all conversations or analyzing one folder at a time. The script outputs statistical summaries, visualizations, word clouds, and emotion analysis for each conversation.
 
 ## Features
 
 * Counts total messages, messages per user, and frequent phrases
 * Detects the longest message streaks and longest gaps
 * Calculates average message lengths per user
+* Emotion classification of messages using machine learning
 * Generates:
 
   * Word cloud from meaningful words
   * Daily message frequency graph
   * Heatmap of message activity by day and hour
+  * Emotion analysis predictions for messages
 
 ## Requirements
 
@@ -21,6 +23,8 @@ Install dependencies using:
 pip install -r requirements.txt
 ```
 
+**Note**: The emotion classification feature requires additional setup. You'll need to run `emotion_classifier.py` once to download the dataset and train the model before using the main analyzer.
+
 ---
 
 ## Project Structure
@@ -29,25 +33,51 @@ The project is organized as follows:
 
 ```
 IG Analyzer/
-├── main.py          # Main script to process Instagram DM data
-├── config.py        # Configuration file for setting up paths and parameters
-├── requirements.txt # List of Python dependencies
-├── README.md        # Project documentation
-└── LICENSE          # License file
+├── main.py                 # Main script to process Instagram DM data
+├── config.py               # Configuration file for setting up paths and parameters
+├── emotion_classifier.py   # Script to train the emotion classification model
+├── requirements.txt        # List of Python dependencies
+├── README.md              # Project documentation
+└── LICENSE                # License file
 ```
 
 Each file serves a specific purpose:
 
-- **main.py**: The entry point of the application. Contains the logic for processing all or single folders.
-- **config.py**: Stores configurable parameters like folder paths and other constants.
+- **main.py**: The entry point of the application. Contains the logic for processing all or single folders, including emotion analysis.
+- **config.py**: Stores configurable parameters like folder paths, text processing patterns, and analysis functions.
+- **emotion_classifier.py**: Downloads dataset and trains a machine learning model for emotion classification of messages.
 - **requirements.txt**: Lists all the Python libraries required to run the project.
 - **README.md**: Provides detailed instructions on how to use the tool.
 - **LICENSE**: Specifies the licensing terms for the project.
+
+---
+
+## Initial Setup
+
+### 1. Install Dependencies
+```bash
+pip install -r requirements.txt
+```
+
+### 2. Train Emotion Classification Model (One-time setup)
+Before using the main analyzer, you need to train the emotion classification model:
+
+```bash
+python emotion_classifier.py
+```
+
+This will:
+- Download the DailyDialog dataset from Kaggle
+- Train a logistic regression model for emotion classification
+- Save the trained model as `emotion_classifier.pkl` and `vectorizer.pkl`
+
+**Note**: This step only needs to be done once. The trained model files will be reused for all future analyses.
+
 ---
 
 ## How to Get Your Instagram Data
 
-To use this tool, you’ll need to download your Instagram data (specifically your messages). Here's how to do it:
+To use this tool, you'll need to download your Instagram data (specifically your messages). Here's how to do it:
 1. Open Instagram.
 
 2. Go to Instagram **Settings**.  
@@ -82,7 +112,7 @@ When the download is complete:
 
 * Extract the ZIP file you receive.
 * Look for the folder named something like `messages/inbox`.
-* That’s the folder you’ll point to in this project as either your `main_folder`.
+* That's the folder you'll point to in this project as either your `main_folder`.
 * If you want to do 1 dm only navigate into `message/inbox` and put the folder path you want as your `single_folder`
 
 ---
@@ -92,7 +122,9 @@ When the download is complete:
 
 1. Download your Instagram data and unzip it.
 
-2. Open `main.py` and choose **only one** of the two options below:
+2. **Make sure you've completed the Initial Setup** (especially training the emotion model).
+
+3. Open `main.py` and choose **only one** of the two options below:
 
    * If you want to process **all inbox folders**, use Option 1.
    * If you want to process **a single conversation folder**, use Option 2.
@@ -261,12 +293,43 @@ If a folder name already exists, a numeric suffix is added automatically (e.g., 
       "start": "2021-02-10",
       "end": "2021-03-01"
     }
-  }
+  },
+  "days_active": 85.6
 }
 ```
+
 ---
+
+## Emotion Classification
+
+The tool includes emotion classification functionality that analyzes the emotional content of messages. The emotion classifier uses a machine learning model trained on the DailyDialog dataset to predict emotions in text.
+
+### Emotion Categories
+The model classifies messages into the following emotion categories:
+- 0: No emotion
+- 1: Anger
+- 2: Disgust
+- 3: Fear
+- 4: Happiness
+- 5: Sadness
+- 6: Surprise
+
+### Usage
+The emotion analysis is available through the `emotions_game()` function in `main.py`, which returns a DataFrame with predicted emotions for each message. This feature processes and normalizes text before classification to improve accuracy.
+
+---
+
+## Performance Monitoring
+
+The tool includes built-in performance monitoring that tracks execution time for different functions. This helps identify bottlenecks when processing large datasets. Timing information is collected using thread-safe mechanisms for accurate measurements during concurrent processing.
+
+---
+
 ## Known Issues
 * Chats with no messages or just images do not work at all
+* Emotion classification requires the model files to be present (run `emotion_classifier.py` first)
+* The Model isn't very accurate ye
+
 ---
 
 ## License

@@ -3,6 +3,7 @@ import time
 from collections import Counter, defaultdict
 from concurrent.futures import ThreadPoolExecutor
 from typing import Any
+import joblib
 
 import grapheme
 import numpy as np
@@ -20,6 +21,9 @@ from config import (
     ATTACHMENT_PATTERN, STOP_WORDS, SYS_FONT_PATH,
     get_analysis_functions, get_plot_functions
 )
+
+clf = joblib.load('emotion_classifier.pkl')
+vectorizer = joblib.load('vectorizer.pkl')
 
 url_pattern = URL_PATTERN
 punct_pattern = PUNCT_PATTERN  
@@ -396,6 +400,17 @@ def process_folder(folder: str) -> None:
             plot_func(data, person_result_dir)
         except Exception as e:
             print(f"Error in plotting function {plot_func.__name__} for {person_name}: {e}")
+
+def emotions_game(df: pd.DataFrame) -> None:
+    df_copy = df.copy()
+    df_copy = df_copy.dropna(subset=['content'])
+    df_copy['content'].apply(TextProcessor.clean_text)
+    df_copy = df_copy[df_copy['content'].apply(TextProcessor.filter_by_length)]
+    df_copy['content'] = df_copy['content'].apply(TextProcessor.normalize_repeats)
+
+    insta_tfidf = vectorizer.transform(df_copy['content'])
+    df_copy['predicted_emotion'] = clf.predict(insta_tfidf)
+    return df_copy[['sender_name', 'datetime', 'content', 'predicted_emotion']]
 
 
 if __name__ == "__main__":

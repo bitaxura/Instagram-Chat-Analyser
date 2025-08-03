@@ -3,6 +3,7 @@ import ast
 import regex as re
 import pandas as pd
 import kagglehub
+import joblib
 
 from sklearn.feature_extraction.text import TfidfVectorizer
 from sklearn.linear_model import LogisticRegression
@@ -63,6 +64,9 @@ x_test_tfidf  = vectorizer.transform(X_test)
 
 clf = LogisticRegression(max_iter=1000,class_weight='balanced', random_state=42)
 clf.fit(x_train_tfidf, y_train)
+
+joblib.dump(clf, 'emotion_classifier.pkl')
+joblib.dump(vectorizer, 'vectorizer.pkl')
 
 y_valid_pred = clf.predict(x_valid_tfidf)
 print(classification_report(y_valid, y_valid_pred))

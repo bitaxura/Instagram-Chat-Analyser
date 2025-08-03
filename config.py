@@ -4,6 +4,7 @@ import threading
 from collections import defaultdict
 
 function_timings = defaultdict(float)
+function_call_counts = defaultdict(int)
 timing_lock = threading.Lock()
 
 URL_PATTERN = re.compile(r'https?://\S+|www\.\S+')
@@ -12,7 +13,7 @@ EMOJI_PATTERN = re.compile(r'[\U0001F300-\U0001F6FF\U0001F900-\U0001F9FF]')
 ATTACHMENT_PATTERN = re.compile(r'\b(\w+)\s+sent an attachment\b')
 
 if platform.system() == "Windows":
-    SYS_FONT_PATH = "C:\\Windows\\Fonts\\seguiemj.ttf"
+    SYS_FONT_PATH = r"C:\Windows\Fonts\seguiemj.ttf"
 elif platform.system() == "Darwin":
     SYS_FONT_PATH = "/System/Library/Fonts/Apple Color Emoji.ttc"
 elif platform.system() == "Linux":
@@ -45,7 +46,6 @@ STOP_WORDS = {
 }
 
 def get_analysis_functions():
-    """Returns analysis functions mapping. Must be called after classes are defined."""
     from main import Analyzer
     
     return {
@@ -59,7 +59,6 @@ def get_analysis_functions():
     }
 
 def get_plot_functions():
-    """Returns plot functions list. Must be called after classes are defined."""
     from main import Visualizer
     
     return [

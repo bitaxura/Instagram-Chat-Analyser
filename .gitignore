@@ -5,3 +5,4 @@ venv/
 *.png
 *.csv
 *.prof
+*.pkl
