@@ -4,6 +4,10 @@ import regex as re
 import pandas as pd
 import kagglehub
 
+from sklearn.feature_extraction.text import TfidfVectorizer
+from sklearn.linear_model import LogisticRegression
+from sklearn.metrics import classification_report, accuracy_score
+
 #pd.set_option('display.max_colwidth', None)
 path = kagglehub.dataset_download("thedevastator/dailydialog-unlock-the-conversation-potential-in")
 
@@ -43,3 +47,25 @@ def process_df(df: pd.DataFrame) -> tuple[list[str], list[int]]:
 train_dialogs, train_emotions = process_df(train_df)
 valid_dialogs, valid_emotions = process_df(valid_df)
 test_dialogs, test_emotions = process_df(test_df)
+
+X_train = train_dialogs
+y_train = train_emotions
+X_valid = valid_dialogs
+
+y_valid = valid_emotions
+X_test = test_dialogs
+y_test = test_emotions
+
+vectorizer = TfidfVectorizer(max_features=5000, ngram_range=(1, 2))
+x_train_tfidf = vectorizer.fit_transform(X_train)
+x_valid_tfidf = vectorizer.transform(X_valid)
+x_test_tfidf  = vectorizer.transform(X_test)
+
+clf = LogisticRegression(max_iter=1000,class_weight='balanced', random_state=42)
+clf.fit(x_train_tfidf, y_train)
+
+y_valid_pred = clf.predict(x_valid_tfidf)
+print(classification_report(y_valid, y_valid_pred))
+
+y_test_pred = clf.predict(x_test_tfidf)
+print(classification_report(y_test, y_test_pred))
