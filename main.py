@@ -1,9 +1,9 @@
 import os
 import time
-from collections import Counter, defaultdict
-from concurrent.futures import ThreadPoolExecutor
+from collections import Counter
 from typing import Any
 import joblib
+import multiprocessing as mp
 
 import grapheme
 import numpy as np
@@ -17,53 +17,44 @@ matplotlib.use('Agg')
 import matplotlib.pyplot as plt
 
 from config import (
-    function_timings, function_call_counts, timing_lock, URL_PATTERN, PUNCT_PATTERN, EMOJI_PATTERN, 
+    URL_PATTERN, PUNCT_PATTERN, EMOJI_PATTERN, 
     ATTACHMENT_PATTERN, STOP_WORDS, SYS_FONT_PATH,
     get_analysis_functions, get_plot_functions
 )
 
-clf = joblib.load('emotion_classifier.pkl')
-vectorizer = joblib.load('vectorizer.pkl')
+try:
+    CLF = joblib.load('emotion_classifier.pkl')
+    VECTORIZER = joblib.load('vectorizer.pkl')
+except FileNotFoundError as e:
+    print(f"Error loading model or vectorizer: {e}. Please run the emotion_classifier.py script first.")
+    CLF = None
+    VECTORIZER = None
+except Exception as e:
+    print(f"Unexpected error: {e}")
+    CLF = None
+    VECTORIZER = None
 
-url_pattern = URL_PATTERN
-punct_pattern = PUNCT_PATTERN  
-emoji_pattern = EMOJI_PATTERN
-attachment_pattern = ATTACHMENT_PATTERN
-stop_words = STOP_WORDS
+NLP = spacy.blank("en")
 
-nlp = spacy.blank("en")
+result_folder = r"R:\Results"
 
-def timeit(name):
-    def decorator(func):
-        def wrapper(*args, **kwargs):
-            start = time.time()
-            result = func(*args, **kwargs)
-            
-            with timing_lock:
-                function_timings[name] += time.time() - start
-                function_call_counts[name] += 1
-            return result
-        return wrapper
-    return decorator
 
 class FileOperations:
     @staticmethod
-    @timeit("find_all_folder")
     def find_all_folder(folder_path: str) -> list[str]:
         all_folders = os.listdir(folder_path)
-        folders = [os.path.join(folder_path, f) for f in all_folders if os.path.isdir(os.path.join(folder_path, f))]
+        folders = [os.path.join(folder_path, f) for f in all_folders]
+        folders = [f for f in folders if os.path.isdir(f)]
         return folders
 
-    @staticmethod  
-    @timeit("find_all_files")
+    @staticmethod
     def find_all_files(folder_path: str) -> list[str]:
         all_files = os.listdir(folder_path)
         files = [os.path.join(folder_path, f) for f in all_files if f.endswith('.json')]
         return files
 
     @staticmethod
-    @timeit("make_unique_dir")
-    def make_unique_dir(base_dir, desired_name) -> str:
+    def make_unique_dir(base_dir: str, desired_name: str) -> str:
         candidate = os.path.join(base_dir, desired_name)
         if not os.path.exists(candidate):
             return candidate
@@ -73,6 +64,7 @@ class FileOperations:
             if not os.path.exists(candidate_i):
                 return candidate_i
             i += 1
+
 
 class DataProcessor:
     @staticmethod
@@ -95,7 +87,9 @@ class DataProcessor:
 
     @staticmethod
     def clean_data(df: pd.DataFrame) -> pd.DataFrame:
-        cols_to_keep = ['sender_name', 'datetime', 'content', 'reactions', 'share.link', 'share.share_text', "share.original_content_owner", 'photos', 'audio_files']
+        cols_to_keep = ['sender_name', 'datetime', 'content', 'reactions',
+                         'share.link', 'share.share_text',
+                         "share.original_content_owner", 'photos', 'audio_files']
 
         df['datetime'] = pd.to_datetime(df["timestamp_ms"], unit="ms", utc=True)
         df['datetime'] = df['datetime'].dt.tz_convert('America/New_York')
@@ -115,15 +109,16 @@ class DataProcessor:
 
         return df
 
+
 class TextProcessor:
     @staticmethod
     def clean_text(text: str) -> str:
-        text = url_pattern.sub('', text)
-        text = punct_pattern.sub('', text)
-        tokens = [token.text for token in nlp(text)]
+        text = URL_PATTERN.sub('', text)
+        text = PUNCT_PATTERN.sub('', text)
+        tokens = [token.text for token in NLP(text)]
         tokens = [word.strip() for word in tokens]
 
-        output = [word for word in tokens if word not in stop_words]
+        output = [word for word in tokens if word not in STOP_WORDS]
         return ' '.join(output)
 
     @staticmethod
@@ -135,7 +130,7 @@ class TextProcessor:
 
     @staticmethod
     def extract_emojis(s: str) -> str:
-        emojis = emoji_pattern.findall(s)
+        emojis = EMOJI_PATTERN.findall(s)
         return ''.join(emojis)
 
     @staticmethod
@@ -146,24 +141,24 @@ class TextProcessor:
 
     @staticmethod
     def preserve_attachment_phrases(s: str) -> str:
-        s = attachment_pattern.sub(r'\1_sent_an_attachment', s)
+        s = ATTACHMENT_PATTERN.sub(r'\1_sent_an_attachment', s)
         return s
-    
+
     @staticmethod
-    def filter_by_length(text: str, min_len=8, max_len=200) -> bool:
+    def filter_by_length(text: str, min_len: int=8, max_len: int=200) -> bool:
         length = len(text.split())
         return min_len <= length <= max_len
-    
+
     @staticmethod
-    def normalize_repeats(text):
+    def normalize_repeats(text: str) -> str:
         text = re.sub(r'(.)\1{2,}', r'\1\1', text)
         text = re.sub(r'([!?])\1{1,}', r'\1', text)
         return text
 
-@timeit("default")
+
 def default(obj):
     if isinstance(obj, pd.DataFrame):
-        return obj.to_dict(orient="records") 
+        return obj.to_dict(orient="records")
     if isinstance(obj, pd.Series):
         return obj.to_dict()
     if isinstance(obj, pd.Timestamp):
@@ -181,17 +176,14 @@ def default(obj):
 
 class Analyzer:
     @staticmethod
-    @timeit("get_total_messages")
     def get_total_messages(df: pd.DataFrame) -> int:
         return df['content'].notna().sum()
 
     @staticmethod
-    @timeit("get_message_count")
     def get_message_count(df: pd.DataFrame, text: str) -> int:
         return df['content'].str.contains(text, case=False, na=False).sum()
 
     @staticmethod
-    @timeit("count_messages_sent")
     def count_messages_sent(df: pd.DataFrame) -> dict[str, int]:
         numbers = df.value_counts('sender_name')
         proportions = df.value_counts('sender_name', True).round(3)
@@ -202,23 +194,19 @@ class Analyzer:
         }
 
     @staticmethod
-    @timeit("get_most_frequent_messages")
     def get_most_frequent_messages(df: pd.DataFrame) -> pd.Series:
         return df['content'].value_counts().head(20)
 
     @staticmethod
-    @timeit("get_messages_per_index")
     def get_messages_per_index(df: pd.DataFrame, index: str = "D") -> pd.Series:
-        return df.set_index("datetime").resample(index).size()
+        return df.resample(index, on="datetime").size()
 
     @staticmethod
-    @timeit("most_active_days")
     def most_active_days(df: pd.DataFrame, num: int = 10) -> list[dict]:
         s = Analyzer.get_messages_per_index(df, "D").sort_values(ascending=False).head(num)
         return [{"date": str(date.date()), "messages": int(count)} for date, count in s.items()]
 
     @staticmethod
-    @timeit("average_message_length")
     def average_message_length(df: pd.DataFrame) -> pd.Series:
         df['content_length'] = df['content'].apply(lambda x: grapheme.length(x) if isinstance(x, str) else 0)
         avg_lengths = df.groupby('sender_name')['content_length'].mean().astype(int)
@@ -226,7 +214,6 @@ class Analyzer:
         return avg_lengths
 
     @staticmethod
-    @timeit("get_message_streaks")
     def get_message_streaks(df: pd.DataFrame) -> dict[str, dict[str, Any]]:
         dates = df["datetime"].dt.normalize().drop_duplicates()
         data_range = pd.date_range(dates.min(), dates.max(), freq="D")
@@ -284,7 +271,6 @@ class Analyzer:
 
 class Visualizer:
     @staticmethod
-    @timeit("day_time_graph")
     def day_time_graph(df: pd.DataFrame, output_dir: str) -> None:
         temp_df = df[['datetime']].copy()
         temp_df['day_of_week'] = temp_df['datetime'].dt.day_name()
@@ -320,7 +306,7 @@ class Visualizer:
                 value = int(data[i, j])
                 if value > 0:
                     color = 'white' if value > data.max() * 0.5 else 'black'
-                    ax.text(j, i, str(value), ha='center', va='center', 
+                    ax.text(j, i, str(value), ha='center', va='center',
                             color=color, fontsize=8)
 
         ax.set_title('Activity by Day and Hour')
@@ -332,22 +318,27 @@ class Visualizer:
         plt.close()
 
     @staticmethod
-    @timeit("build_freq_graph")
     def build_freq_graph(df: pd.DataFrame, output_dir: str, index: str = "D") -> None:
         frequency = Analyzer.get_messages_per_index(df, index)
+
+        if len(frequency) <= 1:
+            return
+
         plt.figure(figsize=(12,6))
         frequency.plot()
         plt.title("Messages Sent Per Day")
         plt.xlabel("Date")
         plt.ylabel("Message Count")
-        plt.tight_layout()
+        try:
+            plt.tight_layout()
+        except:
+            plt.subplots_adjust(bottom=0.15, left=0.1, right=0.95, top=0.9)
 
         output_path = os.path.join(output_dir, "messages_per_day.png")
         plt.savefig(output_path, bbox_inches='tight', pad_inches=0.5)
         plt.close()
 
     @staticmethod
-    @timeit("generate_wordcloud")
     def generate_wordcloud(df: pd.DataFrame, output_dir: str) -> None:
         all_words = df['content'].dropna().apply(TextProcessor.clean_text)
         all_words = all_words[all_words.str.len() > 0]
@@ -370,21 +361,27 @@ class Visualizer:
         output_path = os.path.join(output_dir, "wordcloud.png")
         wordcloud.to_file(output_path)
 
-analysis_functions = get_analysis_functions()
-plot_functions = get_plot_functions()
+
+ANALYSIS_FUNCTIONS = get_analysis_functions()
+PLOT_FUNCTIONS = get_plot_functions()
+
 
 def process_folder(folder: str) -> None:
     files = FileOperations.find_all_files(folder)
 
     person_name = os.path.basename(folder).rsplit('_', 1)[0]
+    data = DataProcessor.read_json_files(files)
+
+    if data['content'].count() < 30 or data['datetime'].dt.normalize().drop_duplicates().count() < 3:
+        print(f"Skipping {person_name}: Not enough messages")
+        return
+
+    print(f"Processing {person_name}")
     person_result_dir = FileOperations.make_unique_dir(result_folder, person_name)
     os.makedirs(person_result_dir, exist_ok=True)
 
-    print(f"Processing {person_name}...")
-    data = DataProcessor.read_json_files(files)
-
     results = {}
-    for key, func in analysis_functions.items():
+    for key, func in ANALYSIS_FUNCTIONS.items():
         try:
             results[key] = func(data)
         except Exception as e:
@@ -394,12 +391,13 @@ def process_folder(folder: str) -> None:
     json_path = os.path.join(person_result_dir, "analysis_results.json")
     with open(json_path, 'wb') as f:
         f.write(orjson.dumps(results, option=orjson.OPT_INDENT_2, default=default))
-
-    for plot_func in plot_functions:
+    
+    for func in PLOT_FUNCTIONS:
         try:
-            plot_func(data, person_result_dir)
+            func(data, person_result_dir)
         except Exception as e:
-            print(f"Error in plotting function {plot_func.__name__} for {person_name}: {e}")
+            print(f"Error in plotting function {func.__name__} for {person_name}: {e}")
+
 
 def emotions_game(df: pd.DataFrame) -> None:
     df_copy = df.copy()
@@ -408,8 +406,8 @@ def emotions_game(df: pd.DataFrame) -> None:
     df_copy = df_copy[df_copy['content'].apply(TextProcessor.filter_by_length)]
     df_copy['content'] = df_copy['content'].apply(TextProcessor.normalize_repeats)
 
-    insta_tfidf = vectorizer.transform(df_copy['content'])
-    df_copy['predicted_emotion'] = clf.predict(insta_tfidf)
+    insta_tfidf = VECTORIZER.transform(df_copy['content'])
+    df_copy['predicted_emotion'] = CLF.predict(insta_tfidf)
     return df_copy[['sender_name', 'datetime', 'content', 'predicted_emotion']]
 
 
@@ -422,22 +420,20 @@ if __name__ == "__main__":
     # Comment off the option you don't use with #
     # Option 1: Process all inbox folders
     main_folder = r"YOUR-MAIN-FOLDER-HERE"  # Path to the main inbox folder, it should end in "/messages/inbox"
-    result_folder = r"YOUR-RESULT-FOLDER-HERE"  # Path of folder to store the results 
+    result_folder = r"YOUR-RESULT-FOLDER-HERE"  # Path of folder to store the results
+
     folders = FileOperations.find_all_folder(main_folder)
+    print("Processing all inbox folders")
 
-    print("Processing all inbox folders...")
-    with ThreadPoolExecutor() as executor:
-        executor.map(process_folder, folders)
+    print(f"Processing {len(folders)} folders using {mp.cpu_count()} processes")
 
-    print("\nFunction timings:")
-    for fname, t in sorted(function_timings.items(), key=lambda x: -x[1]):
-        print(f"{fname}: {t:.2f} seconds")
+    with mp.Pool(processes=mp.cpu_count()) as pool:
+        pool.map(process_folder, folders)
 
-    
     # Option 2: Process a single folder
     # single_folder = r"YOUR-SINGLE-FOLDER-HERE"  # Path to a specific folder (e.g., one DM or group chat)
     # result_folder = r"YOUR-RESULT-FOLDER-HERE"  # Path to store the results
-    # print(f"Processing single folder: {os.path.basename(single_folder)}...")
+    # print(f"Processing single folder: {os.path.basename(single_folder)}")
     # process_folder(single_folder)
 
     end = time.time()

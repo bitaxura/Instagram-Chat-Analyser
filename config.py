@@ -1,11 +1,5 @@
 import platform
 import regex as re
-import threading
-from collections import defaultdict
-
-function_timings = defaultdict(float)
-function_call_counts = defaultdict(int)
-timing_lock = threading.Lock()
 
 URL_PATTERN = re.compile(r'https?://\S+|www\.\S+')
 PUNCT_PATTERN = re.compile(r'[^\w\s\U0001F300-\U0001F6FF\U0001F900-\U0001F9FF]')
@@ -62,7 +56,7 @@ def get_plot_functions():
     from main import Visualizer
     
     return [
+        Visualizer.generate_wordcloud,
         Visualizer.day_time_graph,
-        Visualizer.build_freq_graph,
-        Visualizer.generate_wordcloud
+        Visualizer.build_freq_graph
     ]

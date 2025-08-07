@@ -139,23 +139,26 @@ This will process every conversation inside your main Instagram inbox folder.
 Uncomment and fill out this block:
 
 ```python
-main_folder = r"YOUR-INSTAGRAM-DOWNLOAD-FOLDER-HERE"  # e.g., r"C:\Users\You\instagram\inbox"
-result_folder = r"YOUR-RESULT-FOLDER-HERE"            # e.g., r"C:\Users\You\results"
+main_folder = r"YOUR-MAIN-FOLDER-HERE"  # Path to the main inbox folder, it should end in "/messages/inbox"
+result_folder = r"YOUR-RESULT-FOLDER-HERE"  # Path of folder to store the results
+minimum_messages = 30 # Minimum number of messages in a conversation to be processed, choose based on your needs
+minimum_days = 3 # Minimum number of active days in a conversation to be processed, choose based on your needs
 
-folders = find_all_folder(main_folder)
+folders = FileOperations.find_all_folder(main_folder)
+print("Processing all inbox folders")
 
-print("Processing all inbox folders...")
-with ThreadPoolExecutor() as executor:
-    executor.map(process_folder, folders)
+print(f"Processing {len(folders)} folders using {mp.cpu_count()} processes")
+
+with mp.Pool(processes=mp.cpu_count()) as pool:
+    pool.map(process_folder, folders)
 ```
 
 And make sure the **single folder** block below is commented out:
 
 ```python
-# single_folder = r"YOUR-SINGLE-FOLDER-HERE"  # e.g., r"C:\Users\You\instagram\inbox\johndoe_123"
+# single_folder = r"YOUR-SINGLE-FOLDER-HERE"  # Path to a specific folder (e.g., one DM or group chat)
 # result_folder = r"YOUR-RESULT-FOLDER-HERE"  # Path to store the results
-
-# print(f"Processing single folder: {os.path.basename(single_folder)}...")
+# print(f"Processing single folder: {os.path.basename(single_folder)}")
 # process_folder(single_folder)
 ```
 
@@ -177,19 +180,22 @@ Uncomment and fill out this block:
 single_folder = r"YOUR-SINGLE-FOLDER-HERE"  # e.g., r"C:\Users\You\instagram\inbox\johndoe_123"
 result_folder = r"YOUR-RESULT-FOLDER-HERE"  # e.g., r"C:\Users\You\results"
 
-print(f"Processing single folder: {os.path.basename(single_folder)}...")
+print(f"Processing single folder: {os.path.basename(single_folder)}")
 process_folder(single_folder)
 ```
 
 And make sure the **all inbox folders** block above it is commented out:
 
 ```python
-# main_folder = r"YOUR-INSTAGRAM-DOWNLOAD-FOLDER-HERE"
-# result_folder = r"YOUR-RESULT-FOLDER-HERE"
-# folders = find_all_folder(main_folder)
-# print("Processing all inbox folders...")
-# with ThreadPoolExecutor() as executor:
-#     executor.map(process_folder, folders)
+# main_folder = r"YOUR-MAIN-FOLDER-HERE"  # Path to the main inbox folder, it should end in "/messages/inbox"
+# result_folder = r"YOUR-RESULT-FOLDER-HERE"  # Path of folder to store the results 
+# folders = FileOperations.find_all_folder(main_folder)
+# print("Processing all inbox folders")
+#
+# print(f"Processing {len(folders)} folders using {mp.cpu_count()} processes")
+#
+# with mp.Pool(processes=mp.cpu_count()) as pool:
+#     pool.map(process_folder, folders)
 ```
 
 Then run the script:
@@ -319,16 +325,10 @@ The emotion analysis is available through the `emotions_game()` function in `mai
 
 ---
 
-## Performance Monitoring
-
-The tool includes built-in performance monitoring that tracks execution time for different functions. This helps identify bottlenecks when processing large datasets. Timing information is collected using thread-safe mechanisms for accurate measurements during concurrent processing.
-
----
-
 ## Known Issues
 * Chats with no messages or just images do not work at all
 * Emotion classification requires the model files to be present (run `emotion_classifier.py` first)
-* The Model isn't very accurate ye
+* The model isn't very accurate yet
 
 ---
 
