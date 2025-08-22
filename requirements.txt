@@ -6,3 +6,5 @@ wordcloud
 grapheme
 spacy
 regex
+pygame
+joblib

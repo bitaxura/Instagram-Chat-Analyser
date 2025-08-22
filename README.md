@@ -14,6 +14,7 @@ This tool analyzes Instagram direct message (DM) data downloaded from your accou
   * Daily message frequency graph
   * Heatmap of message activity by day and hour
   * Emotion analysis predictions for messages
+  * Pie chart of message split by user
 
 ## Requirements
 
@@ -219,7 +220,8 @@ results/
 │   ├── analysis_results.json
 │   ├── day_time_graph.png
 │   ├── messages_per_day.png
-│   └── wordcloud.png
+│   ├── wordcloud.png
+│   └── pie_chart.svg
 ├── JaneSmith/
 │   ├── analysis_results.json
 │   ├── ...
@@ -235,7 +237,8 @@ results/
     ├── analysis_results.json
     ├── day_time_graph.png
     ├── messages_per_day.png
-    └── wordcloud.png
+    ├── wordcloud.png
+    └── pie_chart.svg
 ```
 
 If a folder name already exists, a numeric suffix is added automatically (e.g., `JohnDoe1`, `JohnDoe2`, etc.).
@@ -261,6 +264,28 @@ If a folder name already exists, a numeric suffix is added automatically (e.g., 
     "okay": 25,
     "sure": 22,
     "thanks": 20
+  },
+  "most_frequent_emojis_sent": {
+    "Alice": {
+      "😂": 12,
+      "❤️": 8,
+      "👍": 5
+    },
+    "Bob": {
+      "😎": 7,
+      "🔥": 4,
+      "😅": 3
+    }
+  },
+  "most_frequent_emojis_reacted": {
+    "Alice": {
+      "❤️": 10,
+      "😂": 6
+    },
+    "Bob": {
+      "👍": 9,
+      "😮": 4
+    }
   },
   "most_active_days": [
     {
@@ -300,7 +325,7 @@ If a folder name already exists, a numeric suffix is added automatically (e.g., 
       "end": "2021-03-01"
     }
   },
-  "days_active": 85.6
+  "days_active": 85
 }
 ```
 

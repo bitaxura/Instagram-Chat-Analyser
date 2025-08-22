@@ -1,5 +1,12 @@
 import platform
 import regex as re
+import warnings
+
+warnings.filterwarnings(
+    "ignore",
+    category=UserWarning,
+    message=r"Glyph .* missing from font"
+)
 
 URL_PATTERN = re.compile(r'https?://\S+|www\.\S+')
 PUNCT_PATTERN = re.compile(r'[^\w\s\U0001F300-\U0001F6FF\U0001F900-\U0001F9FF]')
@@ -39,24 +46,23 @@ STOP_WORDS = {
     'yours', 'wouldn', 'now', 'have', 'so', 'nt'
 }
 
-def get_analysis_functions():
-    from main import Analyzer
-    
+def get_analysis_functions(Analyzer):
     return {
         "total_messages": Analyzer.get_total_messages,
         "messages_sent": Analyzer.count_messages_sent,
         "most_frequent_messages": Analyzer.get_most_frequent_messages,
+        "most_frequent_emojis_sent": Analyzer.get_most_frequent_emojis_sent,
+        "most_frequent_emojis_reacted": Analyzer.get_most_frequent_emojis_reacted,
         "most_active_days": Analyzer.most_active_days,
         "average_message_length": Analyzer.average_message_length,
         "message_streaks": Analyzer.get_message_streaks,
-        "days_active": Analyzer.days_active
+        "days_active": Analyzer.days_active,
     }
 
-def get_plot_functions():
-    from main import Visualizer
-    
+def get_plot_functions(Visualizer):    
     return [
-        Visualizer.generate_wordcloud,
         Visualizer.day_time_graph,
-        Visualizer.build_freq_graph
+        Visualizer.build_freq_graph,
+        Visualizer.generate_wordcloud,
+        Visualizer.generate_pie_chart
     ]

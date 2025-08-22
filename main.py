@@ -2,9 +2,9 @@ import os
 import time
 from collections import Counter
 from typing import Any
-import joblib
 import multiprocessing as mp
 
+import joblib
 import grapheme
 import numpy as np
 import orjson
@@ -12,15 +12,18 @@ import pandas as pd
 import regex as re
 import spacy
 from wordcloud import WordCloud
+
 import matplotlib
-matplotlib.use('Agg')
+matplotlib.use("Agg")
 import matplotlib.pyplot as plt
+plt.rcParams['svg.fonttype'] = 'none'
 
 from config import (
-    URL_PATTERN, PUNCT_PATTERN, EMOJI_PATTERN, 
+    URL_PATTERN, PUNCT_PATTERN, EMOJI_PATTERN,
     ATTACHMENT_PATTERN, STOP_WORDS, SYS_FONT_PATH,
-    get_analysis_functions, get_plot_functions
+    get_analysis_functions, get_plot_functions,
 )
+
 
 try:
     CLF = joblib.load('emotion_classifier.pkl')
@@ -35,8 +38,7 @@ except Exception as e:
     VECTORIZER = None
 
 NLP = spacy.blank("en")
-
-result_folder = r"R:\Results"
+result_folder = r"R:\Result"
 
 
 class FileOperations:
@@ -104,8 +106,11 @@ class DataProcessor:
         attachment_mask = df['content'].str.contains('sent an attachment', na=False)
         df.loc[attachment_mask, 'content'] = df.loc[attachment_mask, 'content'].apply(TextProcessor.preserve_attachment_phrases)
 
-        emoji_mask = df['content'].apply(TextProcessor.looks_double_encoded)
-        df.loc[emoji_mask, 'content'] = df.loc[emoji_mask, 'content'].apply(TextProcessor.fix_emoji_encoding)
+        emoji_mask_content = df['content'].apply(TextProcessor.looks_double_encoded)
+        df.loc[emoji_mask_content, 'content'] = df.loc[emoji_mask_content, 'content'].apply(TextProcessor.fix_emoji_encoding)
+
+        emoji_mask_name = df['sender_name'].apply(TextProcessor.looks_double_encoded)
+        df.loc[emoji_mask_name, 'sender_name'] = df.loc[emoji_mask_name, 'sender_name'].apply(TextProcessor.fix_emoji_encoding)
 
         return df
 
@@ -198,6 +203,32 @@ class Analyzer:
         return df['content'].value_counts().head(20)
 
     @staticmethod
+    def get_most_frequent_emojis_sent(df: pd.DataFrame) -> dict[str, pd.Series]:
+        emoji_counts_per_user = {}
+        for user, group in df.groupby('sender_name'):
+            all_emojis = group['content'].dropna().apply(TextProcessor.extract_emojis)
+            all_emojis = ''.join(all_emojis)
+            emoji_counts = Counter(all_emojis)
+            emoji_counts_per_user[user] = pd.Series(emoji_counts).sort_values(ascending=False).head(5)
+
+        return emoji_counts_per_user
+
+    @staticmethod
+    def get_most_frequent_emojis_reacted(df: pd.DataFrame):
+        reacted_dict = {}
+        rx = df['reactions'].explode().dropna()
+        rx_norm = pd.json_normalize(rx)
+        rx_norm['reaction'] = rx_norm['reaction'].apply(TextProcessor.fix_emoji_encoding)
+        emoji_mask_actor = rx_norm['actor'].apply(TextProcessor.looks_double_encoded)
+        rx_norm.loc[emoji_mask_actor, 'actor'] = rx_norm.loc[emoji_mask_actor, 'actor'].apply(TextProcessor.fix_emoji_encoding)
+
+        rx_norm = rx_norm.groupby('actor')
+        for actor, group in rx_norm:
+            reacted_dict[actor] = group['reaction'].value_counts().head(5)
+
+        return reacted_dict
+
+    @staticmethod
     def get_messages_per_index(df: pd.DataFrame, index: str = "D") -> pd.Series:
         return df.resample(index, on="datetime").size()
 
@@ -262,11 +293,9 @@ class Analyzer:
         }
 
     @staticmethod
-    def days_active(df: pd.DataFrame) -> float:
-        df['date'] = df['datetime'].dt.date
-        active_days = df['date'].nunique()
-        total_days = (df['date'].max() - df['date'].min()).days + 1
-        return (active_days / total_days) * 100 if total_days > 0 else 0
+    def days_active(df: pd.DataFrame) -> int:
+        dates = df['datetime'].dt.normalize().drop_duplicates()
+        return dates.count() if not dates.empty else 0
 
 
 class Visualizer:
@@ -361,9 +390,24 @@ class Visualizer:
         output_path = os.path.join(output_dir, "wordcloud.png")
         wordcloud.to_file(output_path)
 
+    @staticmethod
+    def generate_pie_chart(df: pd.DataFrame, output_dir: str) -> None:
+        message_count = Analyzer.count_messages_sent(df)['message_proportions'].head(12)
+        print(message_count)
+        labels = message_count.index.tolist()
+        values = message_count.values.tolist()
 
-ANALYSIS_FUNCTIONS = get_analysis_functions()
-PLOT_FUNCTIONS = get_plot_functions()
+        plt.figure(figsize=(8, 8))
+        plt.pie(values, labels=labels, autopct='%1.1f%%', startangle=90)
+        plt.title("Message % Piechart")
+        plt.axis('equal')
+
+        output_path = os.path.join(output_dir, "pie_chart.svg")
+        plt.savefig(output_path, format='svg', bbox_inches='tight', pad_inches=0.5)
+        plt.close()
+
+ANALYSIS_FUNCTIONS = get_analysis_functions(Analyzer)
+PLOT_FUNCTIONS = get_plot_functions(Visualizer)
 
 
 def process_folder(folder: str) -> None:
