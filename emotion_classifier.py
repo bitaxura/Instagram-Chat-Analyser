@@ -57,7 +57,7 @@ y_valid = valid_emotions
 X_test = test_dialogs
 y_test = test_emotions
 
-vectorizer = TfidfVectorizer(max_features=5000, ngram_range=(1, 2))
+vectorizer = TfidfVectorizer(max_features=25_000, ngram_range=(1, 2))
 x_train_tfidf = vectorizer.fit_transform(X_train)
 x_valid_tfidf = vectorizer.transform(X_valid)
 x_test_tfidf  = vectorizer.transform(X_test)
