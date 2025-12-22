@@ -38,7 +38,6 @@ except Exception as e:
     VECTORIZER = None
 
 NLP = spacy.blank("en")
-result_folder = r"R:\Result"
 
 
 class FileOperations:
@@ -393,7 +392,6 @@ class Visualizer:
     @staticmethod
     def generate_pie_chart(df: pd.DataFrame, output_dir: str) -> None:
         message_count = Analyzer.count_messages_sent(df)['message_proportions'].head(12)
-        print(message_count)
         labels = message_count.index.tolist()
         values = message_count.values.tolist()
 
@@ -410,7 +408,7 @@ ANALYSIS_FUNCTIONS = get_analysis_functions(Analyzer)
 PLOT_FUNCTIONS = get_plot_functions(Visualizer)
 
 
-def process_folder(folder: str) -> None:
+def process_folder(folder: str, result_folder: str) -> None:
     files = FileOperations.find_all_files(folder)
 
     person_name = os.path.basename(folder).rsplit('_', 1)[0]
@@ -472,7 +470,7 @@ if __name__ == "__main__":
     print(f"Processing {len(folders)} folders using {mp.cpu_count()} processes")
 
     with mp.Pool(processes=mp.cpu_count()) as pool:
-        pool.map(process_folder, folders)
+        pool.starmap(process_folder, [(folder, result_folder) for folder in folders])
 
     # Option 2: Process a single folder
     # single_folder = r"YOUR-SINGLE-FOLDER-HERE"  # Path to a specific folder (e.g., one DM or group chat)
