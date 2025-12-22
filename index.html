@@ -3,26 +3,30 @@
 <head>
     <meta charset="UTF-8">
     <meta name="viewport" content="width=device-width, initial-scale=1.0">
-    <title>Chat Analytics Pro</title>
+    <title>Chat Data Visualizer</title>
     <link rel="stylesheet" href="style.css">
 </head>
 <body>
     <div class="app-container">
         <aside class="sidebar">
             <div class="sidebar-header">
-                <h2>Analytics</h2>
+                <h2>Data Visualizer</h2>
                 <div class="upload-container">
                     <label for="folderInput" class="custom-file-upload">
-                        Upload Chat Folder
+                        Upload Analyzed Data Folder
                     </label>
                     <input type="file" id="folderInput" webkitdirectory directory multiple>
                 </div>
             </div>
-            <ul id="chatList"><li class="empty-msg">Waiting for upload...</li></ul>
+            <ul id="chatList">
+                <li class="empty-msg">Waiting for analyzed data...</li>
+            </ul>
         </aside>
 
         <main class="dashboard">
-            <div id="welcomeMessage"><h1>Select a chat to begin analysis</h1></div>
+            <div id="welcomeMessage">
+                <h1>Chat Analysis Visualizer</h1>
+            </div>
 
             <div id="statsContent" class="hidden">
                 <header class="chat-header">
