@@ -76,11 +76,25 @@ class DataProcessor:
         for file in files:
             with open(file, 'rb') as f:
                 data = orjson.loads(f.read())
-            messages = data.get('messages')
-            df = pd.json_normalize(messages)
+            messages = data.get('messages', [])
 
+            rows = []
+            for msg in messages:
+                share = msg.get('share') or {}
+                rows.append({
+                    'sender_name': msg.get('sender_name'),
+                    'timestamp_ms': msg.get('timestamp_ms'),
+                    'content': msg.get('content'),
+                    'reactions': msg.get('reactions'),
+                    'share.link': share.get('link'),
+                    'share.share_text': share.get('share_text'),
+                    'share.original_content_owner': share.get('original_content_owner'),
+                    'photos': msg.get('photos'),
+                    'audio_files': msg.get('audio_files'),
+                })
+
+            df = pd.DataFrame(rows)
             df = DataProcessor.clean_data(df)
-
             dfs.append(df)
 
         combined_dataframe = pd.concat(dfs, ignore_index=True)
@@ -89,14 +103,9 @@ class DataProcessor:
 
     @staticmethod
     def clean_data(df: pd.DataFrame) -> pd.DataFrame:
-        cols_to_keep = ['sender_name', 'datetime', 'content', 'reactions',
-                         'share.link', 'share.share_text',
-                         "share.original_content_owner", 'photos', 'audio_files']
-
         df['datetime'] = pd.to_datetime(df["timestamp_ms"], unit="ms", utc=True)
         df['datetime'] = df['datetime'].dt.tz_convert('America/New_York')
 
-        df = df[[col for col in cols_to_keep if col in df.columns]]
         df = df[df['sender_name'] != 'Meta AI']
 
         df = df[~df['content'].str.lower().str.endswith('liked a message', na=False)]
@@ -211,9 +220,9 @@ class Analyzer:
     def get_most_frequent_emojis_reacted(df: pd.DataFrame):
         reacted_dict = {}
         rx = df['reactions'].explode().dropna()
-        rx_norm = pd.json_normalize(rx)
+        rx_norm = pd.DataFrame(rx.tolist())
         rx_norm['reaction'] = rx_norm['reaction'].apply(TextProcessor.fix_emoji_encoding)
-        emoji_mask_actor = rx_norm['actor'].apply(TextProcessor.looks_double_encoded)
+        emoji_mask_actor = rx_norm['actor'].str.contains(DOUBLE_ENCODED_PATTERN.pattern, na=False)
         rx_norm.loc[emoji_mask_actor, 'actor'] = rx_norm.loc[emoji_mask_actor, 'actor'].apply(TextProcessor.fix_emoji_encoding)
 
         rx_norm = rx_norm.groupby('actor')
