@@ -21,6 +21,7 @@ plt.rcParams['svg.fonttype'] = 'none'
 from config import (
     URL_PATTERN, PUNCT_PATTERN, EMOJI_PATTERN,
     ATTACHMENT_PATTERN, STOP_WORDS, SYS_FONT_PATH,
+    GRAPHEME_PATTERN, DOUBLE_ENCODED_PATTERN,
     get_analysis_functions, get_plot_functions,
 )
 
@@ -105,10 +106,10 @@ class DataProcessor:
         attachment_mask = df['content'].str.contains('sent an attachment', na=False)
         df.loc[attachment_mask, 'content'] = df.loc[attachment_mask, 'content'].apply(TextProcessor.preserve_attachment_phrases)
 
-        emoji_mask_content = df['content'].apply(TextProcessor.looks_double_encoded)
+        emoji_mask_content = df['content'].str.contains(DOUBLE_ENCODED_PATTERN.pattern, na=False)
         df.loc[emoji_mask_content, 'content'] = df.loc[emoji_mask_content, 'content'].apply(TextProcessor.fix_emoji_encoding)
 
-        emoji_mask_name = df['sender_name'].apply(TextProcessor.looks_double_encoded)
+        emoji_mask_name = df['sender_name'].str.contains(DOUBLE_ENCODED_PATTERN.pattern, na=False)
         df.loc[emoji_mask_name, 'sender_name'] = df.loc[emoji_mask_name, 'sender_name'].apply(TextProcessor.fix_emoji_encoding)
 
         return df
@@ -136,12 +137,6 @@ class TextProcessor:
     def extract_emojis(s: str) -> str:
         emojis = EMOJI_PATTERN.findall(s)
         return ''.join(emojis)
-
-    @staticmethod
-    def looks_double_encoded(s: str) -> bool:
-        if not isinstance(s, str):
-            return False
-        return any(128 <= ord(c) <= 255 for c in s)
 
     @staticmethod
     def preserve_attachment_phrases(s: str) -> str:
@@ -188,7 +183,7 @@ class Analyzer:
         return df['content'].str.contains(text, case=False, na=False).sum()
 
     @staticmethod
-    def count_messages_sent(df: pd.DataFrame) -> dict[str, int]:
+    def count_messages_sent(df: pd.DataFrame) -> dict[str, pd.Series[int]]:
         numbers = df.value_counts('sender_name')
         proportions = df.value_counts('sender_name', True).round(3)
 
@@ -238,9 +233,8 @@ class Analyzer:
 
     @staticmethod
     def average_message_length(df: pd.DataFrame) -> pd.Series:
-        df['content_length'] = df['content'].apply(lambda x: grapheme.length(x) if isinstance(x, str) else 0)
+        df['content_length'] = df['content'].apply(lambda x: len(GRAPHEME_PATTERN.findall(x)) if isinstance(x, str) else 0)
         avg_lengths = df.groupby('sender_name')['content_length'].mean().astype(int)
-
         return avg_lengths
 
     @staticmethod

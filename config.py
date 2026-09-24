@@ -12,6 +12,8 @@ URL_PATTERN = re.compile(r'https?://\S+|www\.\S+')
 PUNCT_PATTERN = re.compile(r'[^\w\s\U0001F300-\U0001F6FF\U0001F900-\U0001F9FF]')
 EMOJI_PATTERN = re.compile(r'[\U0001F300-\U0001F6FF\U0001F900-\U0001F9FF]')
 ATTACHMENT_PATTERN = re.compile(r'\b(\w+)\s+sent an attachment\b')
+GRAPHEME_PATTERN = re.compile(r'\X')
+DOUBLE_ENCODED_PATTERN = re.compile(r'[\x80-\xff]')
 
 if platform.system() == "Windows":
     SYS_FONT_PATH = r"C:\Windows\Fonts\seguiemj.ttf"
